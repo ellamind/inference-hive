@@ -1,0 +1,94 @@
+# This is an example configuration file for running fineweb2-annotations on Leonardo (CINECA).
+#
+# === SLURM Configuration ===
+# Consult your cluster's documentation if you are unsure about the values below.
+job_name: "fw2-annotations-deu_Latn-1M"
+partition: "boost_usr_prod"
+account: "AIFAC_L01_028"
+qos: "normal"
+cpus_per_node: 32
+memory_per_node: "0" # "0" for all available memory per node
+gres_per_node: "gpu:4" # Generic resources per node. Examples: "gpu:4", "a100:1", "gpu:h100:8"
+time_limit: "24:00:00" # Max walltime on cluster. Automatically resubmits individual tasks if they exceed time limit.
+# Additional SBATCH arguments (optional)
+additional_sbatch_args:
+  exclude: "lrdn[0032,0701]"  # Exclude specific nodes
+
+
+# === Scaling Configuration ===
+num_inference_servers: 8
+num_nodes_per_inference_server: 1 # For now we support only 1 node per inference server.
+# The total number of nodes will be num_inference_servers * num_nodes_per_inference_server.
+
+# Each inference_server processes one shard of data. For very large datasets you can use more shards than inference servers for checkpointing. However, only num_inference_servers shards will be processed in parallel.
+num_data_shards:
+
+
+# === Environment Configuration ===
+pixi_manifest: "pixi.toml"  # Path to the pixi manifest file. Edit if you want to use one of the pre-installed environments (see README.md).
+pixi_env: "cuda-vllm"  # Name of te pixi environment to use.
+env_vars:
+  HF_HUB_OFFLINE: "1" # you should download data and model beforehand
+  VLLM_DISABLE_COMPILE_CACHE: "1" # multiple vLLM instances on shared filesystem can cause problems
+
+
+# === Inference Server Configuration ===
+# small model, we can use data parallelism
+inference_server_command: > 
+  python -m vllm.entrypoints.openai.api_server
+  --host=localhost
+  --port=64776
+  --model="Qwen/Qwen3-4B"
+  --tensor-parallel-size=1
+  --data-parallel-size=4
+  --max-model-len=16384
+  --trust-remote-code
+  --gpu-memory-utilization=0.9
+  --disable-log-requests
+
+
+# === Health Check Configuration ===
+health_check_max_wait_minutes: 10  # Maximum time to wait for API server to become healthy.
+health_check_interval_seconds: 20  # Interval between health check attempts
+
+
+# === API Configuration ===
+# make sure port is the same as in inference_server_command.
+api_base_url: "http://localhost:64776/v1"
+api_type: "chat-completion"  # "chat-completion" or "completion"
+# make sure model is the same as in inference_server_command.
+model: "Qwen/Qwen3-4B"
+
+
+# === Dataset Configuration ===
+dataset_path: "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/fineweb2-deu_Latn-1M-chat-completion" # hf identifier or local path
+# input_column_name must contain strings for completion or messages for chat-completion.
+input_column_name: "conversation"
+id_column_name: "id"
+use_load_from_disk: true
+
+# Dataset Loading Arguments
+load_dataset_kwargs:
+  # name: "deu_Latn"
+  # split: "train"
+  # cache_dir: "/path/to/cache"
+
+
+# === Output Configuration ===
+output_path: "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/example_outputs/fineweb2-deu_Latn-1M-responses-qwen3-4b" # responses will be saved here
+
+
+# === Completion Arguments ===
+# for completion and chat-completion
+completions_kwargs:
+  temperature: 0.3
+  # max_tokens: 512
+  # top_p: 1.0
+  # frequency_penalty: 0.0
+  # presence_penalty: 0.0
+  # extra_body: {min_tokens: 50}
+
+
+# === Connection Settings ===
+max_connections: 200
+max_retries: 3

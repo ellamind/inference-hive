@@ -1,0 +1,56 @@
+[workspace]
+channels = ["nvidia", "conda-forge"]
+name = "inference-hive"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = "3.12.*"
+
+[pypi-dependencies]
+loguru = ">=0.7.3, <0.8"
+pyyaml = ">=6.0.2, <7"
+pydantic = ">=2.11.7, <3"
+tqdm = ">=4.67.1, <5"
+huggingface-hub = ">=0.32.4, <0.33"
+datasets = ">=3.6.0, <4"
+transformers = ">=4.52.3"
+openai = ">=1.86.0, <2"
+polars = ">=1.30.0, <2"
+tabulate = ">=0.9.0, <0.10"
+
+[feature.cpu]
+platforms = ["linux-64"]
+
+[feature.cpu.pypi-dependencies]
+torch = {version = "==2.7.1", index="https://download.pytorch.org/whl/cpu"}
+
+[feature.cpu.dependencies]
+jupyter = ">=1.1.1,<2"
+
+[feature.cuda-vllm]
+platforms = ["linux-64"]
+
+[feature.cuda-vllm.dependencies]
+cuda-toolkit = "12.8.*"
+
+[feature.cuda-vllm.pypi-dependencies]
+torch = {version = "==2.7.0", index="https://download.pytorch.org/whl/cu128"}
+vllm = "==0.9.1"
+
+[feature.cuda-sglang.dependencies]
+cuda-toolkit = "12.8.*"
+
+[feature.cuda-sglang.pypi-dependencies]
+torch = {version = "==2.7.1", index="https://download.pytorch.org/whl/cu128"}
+sglang = {version = "==0.4.7.post1", extras = ["all"]}
+
+# ToDo: amd rocm env for lumi
+# ToDo: aarch64 cuda env for jupiter
+
+[environments]
+cpu = ["cpu"]
+cuda-vllm = ["cuda-vllm"]
+cuda-sglang = ["cuda-sglang"]

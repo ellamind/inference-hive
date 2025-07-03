@@ -1,0 +1,95 @@
+# === SLURM Configuration ===
+# Consult your cluster's documentation if you are unsure about the values below.
+job_name: ""
+partition: ""
+account: ""
+qos: ""
+cpus_per_node: 32 # cpu is not really needed for our workload.
+memory_per_node: "0" # "0" for all available memory per node
+gres_per_node: "gpu:4" # Generic resources per node. Examples: "gpu:4", "a100:1", "gpu:h100:8"
+time_limit: "24:00:00" # Max walltime on cluster. Jobs are automatically resubmitted if they exceed time limit.
+# Additional SBATCH arguments (optional)
+additional_sbatch_args:
+  # exclude: "node[001-010]"  # Exclude specific nodes
+
+
+# === Scaling Configuration ===
+# The total number of nodes will be num_inference_servers * num_nodes_per_inference_server.
+num_inference_servers: 1
+num_nodes_per_inference_server: 1 # For now we support only 1 node per inference server.
+
+# Each inference_server processes one shard of data. For very large datasets you can opt for more shards than inference servers for checkpointing. However, only num_inference_servers shards will be processed in parallel.
+# This option can also be useful if you want to continue an incomplete run with a different number of inference servers.
+num_data_shards: # leave empty to use num_inference_servers
+
+
+# === Environment Configuration ===
+pixi_manifest: "pixi.toml"  # Path to the pixi manifest file. Edit only if you want to use one of the pre-installed environments (see README.md).
+pixi_env: "cuda-vllm"  # Name of the pixi environment to use (see README.md).
+env_vars:
+  HF_HUB_OFFLINE: "1" # you should download data and model beforehand
+  VLLM_DISABLE_COMPILE_CACHE: "1" # multiple vLLM instances on shared filesystem can cause problems
+
+
+# === Inference Server Configuration ===
+inference_server_command: > 
+  python -m vllm.entrypoints.openai.api_server
+  --host=localhost
+  --port=64776
+  --model="Qwen/Qwen3-4B"
+  --tensor-parallel-size=1
+  --data-parallel-size=4
+  --max-model-len=16384
+  --trust-remote-code
+  --gpu-memory-utilization=0.9
+  --max-log-len=10
+
+
+# === Health Check Configuration ===
+# max_wait_minutes is the maximum time to wait for the API server to become healthy.
+# make sure it is reasonable for loading the model. larger models will take longer.
+health_check_max_wait_minutes: 10  # Maximum time to wait for API server to become healthy.
+health_check_interval_seconds: 20  # Interval between health check attempts
+
+
+# === API Configuration ===
+# make sure port is the same as in inference_server_command.
+api_base_url: "http://localhost:64776/v1"
+api_type: "chat-completion"  # "chat-completion" or "completion"
+# make sure model is the same as in inference_server_command.
+model: "Qwen/Qwen3-4B"
+
+
+# === Dataset Configuration ===
+dataset_path: "" # hf identifier or local path
+# input_column_name must contain strings for completion or messages for chat-completion.
+input_column_name: "messages"
+# id_column_name must contain unique string identifiers for each row. The IDs will be used to match responses with input rows.
+id_column_name: "id"
+use_load_from_disk: false
+
+# Dataset Loading Arguments
+load_dataset_kwargs:
+  # name: "deu_Latn"
+  # split: "train"
+  # cache_dir: "/path/to/cache"
+
+
+# === Output Configuration ===
+output_path: "" # responses will be saved here
+
+
+# === Completion Arguments ===
+# for completion and chat-completion
+completions_kwargs:
+  temperature: 0.0
+  # max_tokens: 100
+  # top_p: 1.0
+  # frequency_penalty: 0.0
+  # presence_penalty: 0.0
+  # extra_body: {min_tokens: 50}
+
+
+# === Connection Settings ===
+max_connections: 100
+max_retries: 3

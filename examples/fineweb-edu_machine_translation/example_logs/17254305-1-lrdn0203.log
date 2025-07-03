@@ -1,0 +1,117 @@
+=== SLURM Job Information ===
+SLURM_JOB_NAME: fw-edu-mt
+SLURM_JOB_ID: 17254306
+SLURM_ARRAY_JOB_ID: 17254305
+SLURM_ARRAY_TASK_ID: 1
+SLURM_JOB_NUM_NODES: 1
+SLURM_JOB_NODELIST: lrdn0203
+SLURM_JOB_PARTITION: boost_usr_prod
+SLURM_JOB_ACCOUNT: aifac_l01_028
+=============================
+2025-07-02 15:56:51 [INFO] No completed shards log found. Proceeding with inference.
+2025-07-02 15:56:52 [INFO] python path: /leonardo_scratch/fast/AIFAC_L01_028/midahl00/pixi_envs/inference-hive-12320864072765873417/envs/cuda-vllm/bin/python
+2025-07-02 15:56:52 [INFO] Validating dataset format for shard 0
+2025-07-02 15:56:56.355 | INFO     | __main__:validate_dataset_from_config:98 - Loading configuration from: fw-edu_mt_run1/config_fw-edu_mt.yaml
+2025-07-02 15:56:56.367 | INFO     | __main__:validate_dataset_from_config:101 - Loading dataset for validation...
+2025-07-02 15:56:56.367 | INFO     | __main__:validate_dataset_from_config:103 - Loading dataset with load_from_disk
+2025-07-02 15:56:56.854 | INFO     | __main__:validate_dataset_from_config:112 - Applying shard 0 of 2 for validation
+2025-07-02 15:56:56.857 | INFO     | __main__:validate_dataset_from_config:115 - Dataset loaded: 50000 rows
+2025-07-02 15:56:56.857 | INFO     | __main__:validate_dataset_from_config:118 - Starting data validation...
+2025-07-02 15:56:56.922 | INFO     | __main__:validate_input_data_format:86 - Input data format validation passed for api_type='chat-completion' with string ID column 'id' using OpenAI's pydantic models
+2025-07-02 15:56:56.922 | INFO     | __main__:validate_dataset_from_config:126 - ✓ Data validation completed successfully!
+2025-07-02 15:56:56.922 | INFO     | __main__:main:165 - Data validation passed! Dataset is ready for inference.
+2025-07-02 15:56:57 [INFO] Dataset validation passed for shard 0
+2025-07-02 15:56:57 [INFO] Starting inference server on 1 nodes
+2025-07-02 15:57:02 [INFO] Waiting for inference server to become healthy
+2025-07-02 15:57:02 [INFO] Maximum health check wait time: 20 minutes
+2025-07-02 15:57:02 [INFO] Health check attempt 1/40 for http://localhost:64776/health
+2025-07-02 15:57:02 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 15:57:32 [INFO] Health check attempt 2/40 for http://localhost:64776/health
+2025-07-02 15:57:32 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 15:58:02 [INFO] Health check attempt 3/40 for http://localhost:64776/health
+2025-07-02 15:58:02 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 15:58:32 [INFO] Health check attempt 4/40 for http://localhost:64776/health
+2025-07-02 15:58:32 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 15:59:02 [INFO] Health check attempt 5/40 for http://localhost:64776/health
+2025-07-02 15:59:02 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 15:59:32 [INFO] Health check attempt 6/40 for http://localhost:64776/health
+2025-07-02 15:59:32 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 16:00:02 [INFO] Health check attempt 7/40 for http://localhost:64776/health
+2025-07-02 16:00:02 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 16:00:32 [INFO] Health check attempt 8/40 for http://localhost:64776/health
+2025-07-02 16:00:32 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 16:01:02 [INFO] Health check attempt 9/40 for http://localhost:64776/health
+2025-07-02 16:01:02 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 16:01:32 [INFO] Health check attempt 10/40 for http://localhost:64776/health
+2025-07-02 16:01:32 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 16:02:02 [INFO] Health check attempt 11/40 for http://localhost:64776/health
+2025-07-02 16:02:02 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 16:02:32 [INFO] Health check attempt 12/40 for http://localhost:64776/health
+2025-07-02 16:02:32 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-02 16:03:02 [INFO] Health check attempt 13/40 for http://localhost:64776/health
+2025-07-02 16:03:02 [INFO] Inference server is healthy and ready!
+2025-07-02 16:03:02 [INFO] Running inference
+2025-07-02 16:03:05.118 | INFO     | __main__:<module>:564 - Configuration:
+{
+    "api_base_url": "http://localhost:64776/v1",
+    "api_type": "chat-completion",
+    "model": "google/gemma-3-27b-it",
+    "dataset_path": "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/fineweb-edu-mt-chat-completion",
+    "input_column_name": "conversation",
+    "id_column_name": "id",
+    "use_load_from_disk": true,
+    "output_path": "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/example_outputs/fw-edu-100k-responses-gemma-3-27b",
+    "load_dataset_kwargs": {},
+    "completions_kwargs": {
+        "temperature": 0.3,
+        "extra_body": {
+            "continue_final_message": true,
+            "add_generation_prompt": false
+        }
+    },
+    "max_connections": 100,
+    "max_retries": 3,
+    "max_consecutive_failures": 20
+}
+2025-07-02 16:03:05.118 | INFO     | __main__:<module>:565 - Dataset shard 0
+2025-07-02 16:03:05.118 | INFO     | __main__:<module>:566 - Number of shards: 2
+2025-07-02 16:03:05.118 | INFO     | __main__:main:189 - Loading dataset with load_from_disk
+2025-07-02 16:03:05.128 | INFO     | __main__:main:199 - Dataset:
+Dataset({
+    features: ['id', 'text', 'conversation'],
+    num_rows: 50000
+})
+2025-07-02 16:03:05.172 | INFO     | validate_data:validate_input_data_format:86 - Input data format validation passed for api_type='chat-completion' with string ID column 'id' using OpenAI's pydantic models
+2025-07-02 16:03:05.174 | INFO     | data_utils:__init__:119 - Found 0 dataset files in /leonardo_work/AIFAC_L01_028/midahl00/inference-hive/example_outputs/fw-edu-100k-responses-gemma-3-27b
+2025-07-02 16:03:05.174 | INFO     | __main__:main:221 - No existing output found in /leonardo_work/AIFAC_L01_028/midahl00/inference-hive/example_outputs/fw-edu-100k-responses-gemma-3-27b
+2025-07-02 16:03:05.255 | DEBUG    | __main__:_setup_signal_handlers:35 - Configured signal handler.
+2025-07-02 16:03:05.257 | INFO     | __main__:run_inference:489 - Starting inference
+2025-07-02 16:04:05.258 | INFO     | __main__:report_progress:389 - Progress: 89/50_000 completed (89 new, 0 existing), Overall: 2.0 reqs/s (7_225 reqs/h), Last 60s: 2.0 reqs/s (7_225 reqs/h), ETA: 6.9h
+2025-07-02 16:05:05.261 | INFO     | __main__:report_progress:389 - Progress: 188/50_000 completed (188 new, 0 existing), Overall: 1.8 reqs/s (6_486 reqs/h), Last 60s: 1.6 reqs/s (5_940 reqs/h), ETA: 8.4h
+2025-07-02 16:06:05.264 | INFO     | __main__:report_progress:389 - Progress: 273/50_000 completed (273 new, 0 existing), Overall: 1.7 reqs/s (5_980 reqs/h), Last 60s: 1.4 reqs/s (5_100 reqs/h), ETA: 9.8h
+2025-07-02 16:07:05.266 | INFO     | __main__:report_progress:389 - Progress: 360/50_000 completed (360 new, 0 existing), Overall: 1.6 reqs/s (5_777 reqs/h), Last 60s: 1.4 reqs/s (5_220 reqs/h), ETA: 9.5h
+2025-07-02 16:08:05.271 | INFO     | __main__:report_progress:389 - Progress: 446/50_000 completed (446 new, 0 existing), Overall: 1.6 reqs/s (5_646 reqs/h), Last 60s: 1.4 reqs/s (5_160 reqs/h), ETA: 9.6h
+2025-07-02 16:09:05.277 | INFO     | __main__:report_progress:389 - Progress: 528/50_000 completed (528 new, 0 existing), Overall: 1.5 reqs/s (5_520 reqs/h), Last 60s: 1.4 reqs/s (4_920 reqs/h), ETA: 10.1h
+2025-07-02 16:10:05.279 | INFO     | __main__:report_progress:389 - Progress: 628/50_000 completed (628 new, 0 existing), Overall: 1.6 reqs/s (5_591 reqs/h), Last 60s: 1.7 reqs/s (6_000 reqs/h), ETA: 8.2h
+2025-07-02 16:11:05.280 | INFO     | __main__:report_progress:389 - Progress: 702/50_000 completed (702 new, 0 existing), Overall: 1.5 reqs/s (5_442 reqs/h), Last 60s: 1.2 reqs/s (4_440 reqs/h), ETA: 11.1h
+2025-07-02 16:12:05.282 | INFO     | __main__:report_progress:389 - Progress: 777/50_000 completed (777 new, 0 existing), Overall: 1.5 reqs/s (5_334 reqs/h), Last 60s: 1.2 reqs/s (4_500 reqs/h), ETA: 10.9h
+2025-07-02 16:13:05.299 | INFO     | __main__:report_progress:389 - Progress: 842/50_000 completed (842 new, 0 existing), Overall: 1.4 reqs/s (5_187 reqs/h), Last 60s: 1.1 reqs/s (3_899 reqs/h), ETA: 12.6h
+slurmstepd: error: *** JOB 17254306 ON lrdn0203 CANCELLED AT 2025-07-02T16:13:22 ***
+2025-07-02 16:13:22 [WARN] Job received cancellation signal, shutting down gracefully...
+2025-07-02 16:13:22 [INFO] Initiating graceful shutdown of processes...
+2025-07-02 16:13:22 [INFO] Sending SIGINT to inference process group (PID: 2149320)
+[?25h2025-07-02 16:13:22.563 | INFO     | __main__:handle_shutdown_signal:23 - Received SIGINT. Closing writer, shutting down.
+2025-07-02 16:13:22.647 | INFO     | __main__:handle_shutdown_signal:27 - Writer closed successfully.
+2025-07-02 16:13:22.647 | INFO     | __main__:handle_shutdown_signal:30 - Exiting due to SIGINT
+2025-07-02 16:13:32 [INFO] Sending SIGINT to inference server process group (PID: 2146476)
+2025-07-02 16:13:32 [INFO] Waiting for processes to finish gracefully...
+2025-07-02 16:13:32 [INFO] Waiting for 1 processes to finish... (0/60)
+2025-07-02 16:13:33 [INFO] Waiting for 1 processes to finish... (1/60)
+2025-07-02 16:13:34 [INFO] Waiting for 1 processes to finish... (2/60)
+2025-07-02 16:13:35 [INFO] Waiting for 1 processes to finish... (3/60)
+2025-07-02 16:13:36 [INFO] Waiting for 1 processes to finish... (4/60)
+2025-07-02 16:13:37 [INFO] Waiting for 1 processes to finish... (5/60)
+2025-07-02 16:13:38 [INFO] All processes have finished gracefully
+2025-07-02 16:13:38 [ERROR] Marked shard 0 as failed: manual_cancellation Job was manually cancelled
+2025-07-02 16:13:38 [INFO] Task 1 was manually cancelled - not resubmitting automatically.
+2025-07-02 16:13:38 [INFO] To restart this task later, run: sbatch --array=1 fw-edu_mt_run1/fw-edu-mt.slurm
