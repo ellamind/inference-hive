@@ -57,7 +57,7 @@ We validate the config and data loading:
 pixi run python validate_config.py --config config_fw-edu_mt.yaml
 # 2025-07-02 15:41:43.600 | INFO     | __main__:main:21 - Validating: examples/fineweb-edu_machine_translation/config_fw-edu_mt.yaml
 # 2025-07-02 15:41:43.605 | INFO     | config:validate_and_set_num_data_shards:218 - num_data_shards not specified, defaulting to num_inference_servers (2)
-# 2025-07-02 15:41:43.606 | INFO     | __main__:main:27 - ✓ Valid for create_job.py
+# 2025-07-02 15:41:43.606 | INFO     | __main__:main:27 - ✓ Valid for create_slurm_script.py
 # 2025-07-02 15:41:43.609 | INFO     | __main__:main:36 - ✓ Valid for run_inference.py
 # 2025-07-02 15:41:43.609 | INFO     | __main__:main:42 - Configuration is valid!
 ```
@@ -75,9 +75,9 @@ pixi run python validate_data.py --config config_fw-edu_mt.yaml
 ```
 
 ## Create a job
-Next, use `create_job.py` to create a job for the `config_fw-edu_mt.yaml` config and with `fw2_annotations_run1` as the job's logging directory.
+Next, use `create_slurm_script.py` to create a job for the `config_fw-edu_mt.yaml` config and with `fw2_annotations_run1` as the job's logging directory.
 ```bash
-pixi run python create_job.py --config config_fw-edu_mt.yaml --output fw-edu_mt_run1
+pixi run python create_slurm_script.py --config config_fw-edu_mt.yaml --output fw-edu_mt_run1
 # 2025-07-02 15:43:03.393 | INFO     | config:validate_and_set_num_data_shards:218 - num_data_shards not specified, defaulting to num_inference_servers (2)
 # 2025-07-02 15:43:03.470 | INFO     | __main__:main:329 - Output directory: fw-edu_mt_run1
 # 2025-07-02 15:43:03.472 | INFO     | __main__:main:359 - Config copied to: fw-edu_mt_run1/config_fw-edu_mt.yaml

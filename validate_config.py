@@ -24,10 +24,10 @@ def main():
     job_valid = False
     try:
         load_job_config(config_path)
-        logger.info("✓ Valid for create_job.py")
+        logger.info("✓ Valid for create_slurm_script.py")
         job_valid = True
     except Exception as e:
-        logger.error(f"✗ Invalid for create_job.py: {e}")
+        logger.error(f"✗ Invalid for create_slurm_script.py: {e}")
     
     # Test InferenceConfig validation  
     inference_valid = False

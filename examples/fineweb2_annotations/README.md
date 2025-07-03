@@ -42,7 +42,7 @@ We validate the config and data loading:
 ```bash
 pixi run python validate_config.py --config config_fw2_annotations.yaml
 # 2025-06-30 11:54:13.203 | INFO     | __main__:main:21 - Validating: config_fw2_annotations.yaml
-# 2025-06-30 11:54:13.208 | INFO     | __main__:main:27 - ✓ Valid for create_job.py
+# 2025-06-30 11:54:13.208 | INFO     | __main__:main:27 - ✓ Valid for create_slurm_script.py
 # 2025-06-30 11:54:13.211 | INFO     | __main__:main:36 - ✓ Valid for run_inference.py
 # 2025-06-30 11:54:13.211 | INFO     | __main__:main:42 - Configuration is valid!
 ```
@@ -61,9 +61,9 @@ pixi run python validate_data.py --config config_fw2_annotations.yaml
 ```
 
 ## Create a job
-Next, use `create_job.py` to create a job for the `config_fw2_annotations.yaml` config and with `fw2_annotations_run1` as the job's logging directory.
+Next, use `create_slurm_script.py` to create a job for the `config_fw2_annotations.yaml` config and with `fw2_annotations_run1` as the job's logging directory.
 ```bash
-pixi run python create_job.py --config config_fw2_annotations.yaml --output fw2_annotations_run1
+pixi run python create_slurm_script.py --config config_fw2_annotations.yaml --output fw2_annotations_run1
 # 2025-06-30 12:02:12.496 | INFO     | __main__:main:323 - Output directory: fw2_annotations_run1
 # 2025-06-30 12:02:12.499 | INFO     | __main__:main:349 - Config copied to: fw2_annotations_run1/config_fw2_annotations.yaml
 # 2025-06-30 12:02:12.500 | INFO     | __main__:main:360 - SLURM job script generated successfully: fw2_annotations_run1/fw2-annotations-deu_Latn-1M.slurm

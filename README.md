@@ -128,7 +128,7 @@ The data validation script will check:
 ### 4. Create a job
 To create a job from a config file, run
 ```
-pixi run python create_job.py --config my_config.yaml --output run1
+pixi run python create_slurm_script.py --config my_config.yaml --output run1
 ```
 The directory specified with `--output` will be used to write log files for the run. The slurm script and a copy of the config will also be saved in this directory.
 
