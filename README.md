@@ -40,7 +40,7 @@ We provide multiple environment definitions for different GPU types and differen
 |TBD|CUDA + SGLang on aarch64 (GH200)||
 |TBD|rocm + vLLM||
 |TBD|rocm + SGLang||
-|cpu|no inference server, debug env|everywhere|
+|cpu|no inference server, debug env|-|
 
 ### Pre-Installed Environments
 We have pre-installed environments on multiple clusters which you can re-use if you are part of the same project. This allows you to skip environment installation, saves storage and inodes.
