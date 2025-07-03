@@ -1,6 +1,8 @@
 <div align="center">
 
-# inference-hive <img src="res/logo.png" alt="inference-hive Logo" width="64" height="64" style="vertical-align: middle;">
+<img src="res/logo.png" alt="inference-hive Logo" width="128" height="128" style="vertical-align: middle;">
+
+# inference-hive
 
 *Run offline LLM inference at scale using SLURM*
 
