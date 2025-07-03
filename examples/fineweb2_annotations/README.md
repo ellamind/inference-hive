@@ -36,6 +36,8 @@ cp config_template.yaml config_fw2_annotations.yaml
 ```
 Then fill the config file. We provide an example here, `examples/fineweb2_annotations/config_fw2_annotations.yaml`, however, the `SLURM Configuration` section will likely differ for you. Also make sure to edit the dataset and output paths. In this example config, we set the number of inference servers to 8.
 
+Also, download the model by running `huggingface-cli download "Qwen/Qwen3-4B"`
+
 ## Validating
 We validate the config and data loading:
 
@@ -60,7 +62,7 @@ pixi run python validate_data.py --config config_fw2_annotations.yaml
 # 2025-06-30 11:51:52.486 | INFO     | __main__:main:165 - Data validation passed! Dataset is ready for inference.
 ```
 
-## Create a job
+## Create a slurm script
 Next, use `create_slurm_script.py` to create a job for the `config_fw2_annotations.yaml` config and with `fw2_annotations_run1` as the job's logging directory.
 ```bash
 pixi run python create_slurm_script.py --config config_fw2_annotations.yaml --output fw2_annotations_run1
@@ -72,7 +74,7 @@ pixi run python create_slurm_script.py --config config_fw2_annotations.yaml --ou
 # 2025-06-30 12:02:12.500 | INFO     | __main__:main:367 - To check job status: squeue -u $USER --name=fw2-annotations-deu_Latn-1M
 ```
 
-## Run the job
+## Submit the job
 To submit the job, run
 ```bash
 sbatch fw2_annotations_run1/fw2-annotations-deu_Latn-1M.slurm

@@ -50,6 +50,8 @@ Then fill the config file. We provide an example here, `examples/fineweb-edu_mac
 ```
 to enable assistant prefill.
 
+Also, download the model by running `huggingface-cli download "google/gemma-3-27b-it"`
+
 ## Validating
 We validate the config and data loading:
 
@@ -74,8 +76,8 @@ pixi run python validate_data.py --config config_fw-edu_mt.yaml
 # 2025-07-02 15:42:17.724 | INFO     | __main__:main:165 - Data validation passed! Dataset is ready for inference.
 ```
 
-## Create a job
-Next, use `create_slurm_script.py` to create a job for the `config_fw-edu_mt.yaml` config and with `fw2_annotations_run1` as the job's logging directory.
+## Create a slurm script
+Next, use `create_slurm_script.py` to create a slurm script for the `config_fw-edu_mt.yaml` config and with `fw2_annotations_run1` as the job's logging directory.
 ```bash
 pixi run python create_slurm_script.py --config config_fw-edu_mt.yaml --output fw-edu_mt_run1
 # 2025-07-02 15:43:03.393 | INFO     | config:validate_and_set_num_data_shards:218 - num_data_shards not specified, defaulting to num_inference_servers (2)
@@ -87,7 +89,7 @@ pixi run python create_slurm_script.py --config config_fw-edu_mt.yaml --output f
 # 2025-07-02 15:43:03.474 | INFO     | __main__:main:377 - To check job status: squeue -u $USER --name=fw-edu-mt
 ```
 
-## Run the job
+## Submit the job
 To submit the job, run
 ```bash
 sbatch fw-edu_mt_run1/fw-edu-mt.slurm

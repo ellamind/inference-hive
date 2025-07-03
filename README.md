@@ -92,8 +92,21 @@ Example Datasets:
 
 
 ### 2. Config File
-Create a copy of `config_template.yaml` and edit it according to your needs.
+Create a copy of `config_template.yaml` and edit it according to your needs. We recommend that you download the model you want to run in advance.
 
+<details><summary>Example for downloading a model from huggingface</summary>
+
+For downloading Qwen3-4B:
+```
+huggingface-cli download "Qwen/Qwen3-4B"
+```
+The default config template contains
+```
+env_vars:
+  HF_HUB_OFFLINE: "1" # you should download data and model beforehand
+```
+and we do not recommend changing that.
+</details>
 
 ### 3. Validating Config and Data (Recommended)
 
@@ -110,7 +123,7 @@ The config validation script will check:
 - Field values pass validation (e.g., time limits, API types)
 
 #### Data Validation  
-Before creating a job, it's highly recommended to validate your input data configuration:
+Before creating a slurm script, it's highly recommended to validate your input data configuration:
 
 ```bash
 pixi run python validate_data.py --config my_config.yaml
@@ -125,15 +138,15 @@ The data validation script will check:
 - For chat-completion: messages conform to OpenAI's ChatCompletionMessageParam spec
 
 
-### 4. Create a job
-To create a job from a config file, run
+### 4. Create a slurm script
+To create a slurm script from a config file, run
 ```
 pixi run python create_slurm_script.py --config my_config.yaml --output run1
 ```
 The directory specified with `--output` will be used to write log files for the run. The slurm script and a copy of the config will also be saved in this directory.
 
 
-### 5. Submit the job
+### 5. Submit the slurm script
 ```
 sbatch run1/my_job.slurm
 ```
