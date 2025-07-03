@@ -201,4 +201,4 @@ Please file an issue to suggest additional items for the roadmap
 For more information see [openeurollm.eu](https://openeurollm.eu/).
 - We acknowledge the EuroHPC Joint Undertaking for awarding this project access to the EuroHPC supercomputer LEONARDO, hosted by CINECA (Italy) and the LEONARDO consortium through an EuroHPC AI Factory Large Scale Access call.
 
-<img src="res/eu_cofunding.png" alt="inference-hive Logo" style="vertical-align: middle;">
+<img src="res/eu_cofunding.png" alt="inference-hive Logo" width="300" style="vertical-align: middle;">
