@@ -46,7 +46,7 @@ We provide multiple environment definitions for different GPU types and differen
 We have pre-installed environments on multiple clusters which you can re-use if you are part of the same project. This allows you to skip environment installation, saves storage and inodes.
 |Cluster|Project|Env Name|Manifest|
 |---|---|---|---|
-|Leonardo Booster|MultiSynt (AIFAC_L01_028)|cuda-vllm|/leonardo_scratch/fast/AIFAC_L01_028/midahl00/pixi_manifests/inference-hive/pixi.toml|
+|Leonardo Booster|MultiSynt (AIFAC_L01_028)|cuda-vllm|`/leonardo_scratch/fast/AIFAC_L01_028/midahl00/pixi_manifests/inference-hive/pixi.toml`|
 
 To use a pre-installed environment, edit `pixi_manifest` in the config accordingly.
 
