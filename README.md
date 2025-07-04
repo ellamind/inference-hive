@@ -46,7 +46,7 @@ We provide multiple environment definitions for different GPU types and differen
 We have pre-installed environments on multiple clusters which you can re-use if you are part of the same project. This allows you to skip environment installation, saves storage and inodes.
 |Cluster|Project|Env Name|Manifest|
 |---|---|---|---|
-|Leonardo Booster|MultiSynt (AIFAC_L01_028)|cuda-vllm|ToDo|
+|Leonardo Booster|MultiSynt (AIFAC_L01_028)|cuda-vllm|/leonardo_scratch/fast/AIFAC_L01_028/midahl00/pixi_manifests/inference-hive/pixi.toml|
 
 To use a pre-installed environment, edit `pixi_manifest` in the config accordingly.
 
@@ -97,8 +97,8 @@ Create a copy of `config_template.yaml` and edit it according to your needs. We 
 <details><summary>Example for downloading a model from huggingface</summary>
 
 For downloading Qwen3-4B:
-```
-huggingface-cli download "Qwen/Qwen3-4B"
+```bash
+pixi run huggingface-cli download "Qwen/Qwen3-4B"
 ```
 The default config template contains
 ```
@@ -192,7 +192,7 @@ We provice some end-to-end examples in `examples/`. To request a specific exampl
 |---|---|---|
 |FineWeb-2 Annotations|`examples/fineweb2_annotations`|Annotate a sample of 1M FineWeb-2 documents with edu-scores using `Qwen/Qwen3-4B`.|
 |Machine Translation with Gemma-3|`examples/fineweb-edu_machine_translation`|Translate 100k FineWeb-edu documents to German with Gemma-3-27b. Includes assistant message prefill to control the response format.|
-
+|Machine Translation into 5 languages with Unbabel Tower+ 72B|`examples/fineweb-edu_mt_tower_5langs`|Translate 100k FineWeb-edu documents into 5 languages with Unbabel Tower+ 72B|
 
 ## Roadmap
 - add pre-installed environments

@@ -36,7 +36,7 @@ cp config_template.yaml config_fw2_annotations.yaml
 ```
 Then fill the config file. We provide an example here, `examples/fineweb2_annotations/config_fw2_annotations.yaml`, however, the `SLURM Configuration` section will likely differ for you. Also make sure to edit the dataset and output paths. In this example config, we set the number of inference servers to 8.
 
-Also, download the model by running `huggingface-cli download "Qwen/Qwen3-4B"`
+Also, download the model by running `pixi run huggingface-cli download "Qwen/Qwen3-4B"`
 
 ## Validating
 We validate the config and data loading:

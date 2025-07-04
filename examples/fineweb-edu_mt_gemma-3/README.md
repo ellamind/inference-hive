@@ -50,7 +50,7 @@ Then fill the config file. We provide an example here, `examples/fineweb-edu_mac
 ```
 to enable assistant prefill.
 
-Also, download the model by running `huggingface-cli download "google/gemma-3-27b-it"`
+Also, download the model by running `pixi run huggingface-cli download "google/gemma-3-27b-it"`
 
 ## Validating
 We validate the config and data loading:

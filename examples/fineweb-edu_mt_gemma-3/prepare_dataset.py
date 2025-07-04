@@ -37,7 +37,7 @@ assistant_prefill= "<translated_document>"
 
 # create a column of conversations for chat-completion
 def create_conversation(example):
-    truncated_text = example["text"][:30000] # truncate to 30000 characters
+    truncated_text = example["text"][:30000] # truncate to 30000 characters for this example
     return {
         "conversation": [
             {"role": "system", "content": system_prompt},

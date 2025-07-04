@@ -1,0 +1,117 @@
+=== SLURM Job Information ===
+SLURM_JOB_NAME: fw-edu-mt-tower
+SLURM_JOB_ID: 17328705
+SLURM_ARRAY_JOB_ID: 17328678
+SLURM_ARRAY_TASK_ID: 1
+SLURM_JOB_NUM_NODES: 1
+SLURM_JOB_NODELIST: lrdn3262
+SLURM_JOB_PARTITION: boost_usr_prod
+SLURM_JOB_ACCOUNT: aifac_l01_028
+=============================
+2025-07-04 09:32:18 [INFO] No completed shards log found. Proceeding with inference.
+2025-07-04 09:32:19 [INFO] python path: /leonardo_scratch/fast/AIFAC_L01_028/midahl00/pixi_envs/inference-hive-5609289652971550968/envs/cuda-vllm/bin/python
+2025-07-04 09:32:19 [INFO] Validating dataset format for shard 0
+2025-07-04 09:32:31.851 | INFO     | __main__:validate_dataset_from_config:98 - Loading configuration from: fw-edu_mt_tower_5langs_run1/config_fw-edu_mt_tower_5langs.yaml
+2025-07-04 09:32:31.865 | INFO     | __main__:validate_dataset_from_config:101 - Loading dataset for validation...
+2025-07-04 09:32:31.866 | INFO     | __main__:validate_dataset_from_config:103 - Loading dataset with load_from_disk
+2025-07-04 09:32:32.586 | INFO     | __main__:validate_dataset_from_config:112 - Applying shard 0 of 20 for validation
+2025-07-04 09:32:32.590 | INFO     | __main__:validate_dataset_from_config:115 - Dataset loaded: 25000 rows
+2025-07-04 09:32:32.590 | INFO     | __main__:validate_dataset_from_config:118 - Starting data validation...
+2025-07-04 09:32:32.707 | INFO     | __main__:validate_input_data_format:86 - Input data format validation passed for api_type='chat-completion' with string ID column 'id' using OpenAI's pydantic models
+2025-07-04 09:32:32.707 | INFO     | __main__:validate_dataset_from_config:126 - ✓ Data validation completed successfully!
+2025-07-04 09:32:32.707 | INFO     | __main__:main:165 - Data validation passed! Dataset is ready for inference.
+2025-07-04 09:32:32 [INFO] Dataset validation passed for shard 0
+2025-07-04 09:32:32 [INFO] Starting inference server on 1 nodes
+2025-07-04 09:32:37 [INFO] Waiting for inference server to become healthy
+2025-07-04 09:32:37 [INFO] Maximum health check wait time: 20 minutes
+2025-07-04 09:32:37 [INFO] Health check attempt 1/40 for http://localhost:64776/health
+2025-07-04 09:32:37 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:33:07 [INFO] Health check attempt 2/40 for http://localhost:64776/health
+2025-07-04 09:33:07 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:33:37 [INFO] Health check attempt 3/40 for http://localhost:64776/health
+2025-07-04 09:33:37 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:34:07 [INFO] Health check attempt 4/40 for http://localhost:64776/health
+2025-07-04 09:34:07 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:34:37 [INFO] Health check attempt 5/40 for http://localhost:64776/health
+2025-07-04 09:34:37 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:35:07 [INFO] Health check attempt 6/40 for http://localhost:64776/health
+2025-07-04 09:35:07 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:35:37 [INFO] Health check attempt 7/40 for http://localhost:64776/health
+2025-07-04 09:35:37 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:36:07 [INFO] Health check attempt 8/40 for http://localhost:64776/health
+2025-07-04 09:36:07 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:36:37 [INFO] Health check attempt 9/40 for http://localhost:64776/health
+2025-07-04 09:36:37 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:37:07 [INFO] Health check attempt 10/40 for http://localhost:64776/health
+2025-07-04 09:37:07 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:37:37 [INFO] Health check attempt 11/40 for http://localhost:64776/health
+2025-07-04 09:37:38 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:38:08 [INFO] Health check attempt 12/40 for http://localhost:64776/health
+2025-07-04 09:38:08 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:38:38 [INFO] Health check attempt 13/40 for http://localhost:64776/health
+2025-07-04 09:38:38 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:39:08 [INFO] Health check attempt 14/40 for http://localhost:64776/health
+2025-07-04 09:39:08 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:39:38 [INFO] Health check attempt 15/40 for http://localhost:64776/health
+2025-07-04 09:39:38 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:40:08 [INFO] Health check attempt 16/40 for http://localhost:64776/health
+2025-07-04 09:40:08 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:40:38 [INFO] Health check attempt 17/40 for http://localhost:64776/health
+2025-07-04 09:40:38 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:41:08 [INFO] Health check attempt 18/40 for http://localhost:64776/health
+2025-07-04 09:41:08 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:41:38 [INFO] Health check attempt 19/40 for http://localhost:64776/health
+2025-07-04 09:41:38 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:42:08 [INFO] Health check attempt 20/40 for http://localhost:64776/health
+2025-07-04 09:42:08 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:42:38 [INFO] Health check attempt 21/40 for http://localhost:64776/health
+2025-07-04 09:42:38 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:43:08 [INFO] Health check attempt 22/40 for http://localhost:64776/health
+2025-07-04 09:43:08 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:43:38 [INFO] Health check attempt 23/40 for http://localhost:64776/health
+2025-07-04 09:43:38 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:44:08 [INFO] Health check attempt 24/40 for http://localhost:64776/health
+2025-07-04 09:44:08 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:44:38 [INFO] Health check attempt 25/40 for http://localhost:64776/health
+2025-07-04 09:44:38 [INFO] Inference server not ready, waiting 30 seconds...
+2025-07-04 09:45:08 [INFO] Health check attempt 26/40 for http://localhost:64776/health
+2025-07-04 09:45:08 [INFO] Inference server is healthy and ready!
+2025-07-04 09:45:08 [INFO] Running inference
+2025-07-04 09:45:11.449 | INFO     | __main__:<module>:564 - Configuration:
+{
+    "api_base_url": "http://localhost:64776/v1",
+    "api_type": "chat-completion",
+    "model": "Unbabel/Tower-Plus-72B",
+    "dataset_path": "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/fineweb-edu-mt-5langs",
+    "input_column_name": "conversation",
+    "id_column_name": "id",
+    "use_load_from_disk": true,
+    "output_path": "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/example_outputs/fineweb-edu-mt-5langs-responses",
+    "load_dataset_kwargs": {},
+    "completions_kwargs": {
+        "temperature": 0.0
+    },
+    "max_connections": 100,
+    "max_retries": 3,
+    "max_consecutive_failures": 20
+}
+2025-07-04 09:45:11.449 | INFO     | __main__:<module>:565 - Dataset shard 0
+2025-07-04 09:45:11.450 | INFO     | __main__:<module>:566 - Number of shards: 20
+2025-07-04 09:45:11.450 | INFO     | __main__:main:189 - Loading dataset with load_from_disk
+2025-07-04 09:45:11.963 | INFO     | __main__:main:199 - Dataset:
+Dataset({
+    features: ['id', 'text', 'target_lang', 'conversation'],
+    num_rows: 25000
+})
+2025-07-04 09:45:12.007 | INFO     | validate_data:validate_input_data_format:86 - Input data format validation passed for api_type='chat-completion' with string ID column 'id' using OpenAI's pydantic models
+2025-07-04 09:45:12.009 | INFO     | data_utils:__init__:119 - Found 0 dataset files in /leonardo_work/AIFAC_L01_028/midahl00/inference-hive/example_outputs/fineweb-edu-mt-5langs-responses
+2025-07-04 09:45:12.009 | INFO     | __main__:main:221 - No existing output found in /leonardo_work/AIFAC_L01_028/midahl00/inference-hive/example_outputs/fineweb-edu-mt-5langs-responses
+2025-07-04 09:45:12.092 | DEBUG    | __main__:_setup_signal_handlers:35 - Configured signal handler.
+2025-07-04 09:45:12.094 | INFO     | __main__:run_inference:489 - Starting inference
+2025-07-04 09:46:12.095 | INFO     | __main__:report_progress:389 - Progress: 40/25_000 completed (40 new, 0 existing), Overall: 1.2 reqs/s (4_179 reqs/h), Last 60s: 1.2 reqs/s (4_179 reqs/h), ETA: 6.0h
+2025-07-04 09:47:12.097 | INFO     | __main__:report_progress:389 - Progress: 116/25_000 completed (116 new, 0 existing), Overall: 1.2 reqs/s (4_421 reqs/h), Last 60s: 1.3 reqs/s (4_560 reqs/h), ETA: 5.5h
+2025-07-04 09:48:12.098 | INFO     | __main__:report_progress:389 - Progress: 170/25_000 completed (170 new, 0 existing), Overall: 1.1 reqs/s (3_962 reqs/h), Last 60s: 0.9 reqs/s (3_240 reqs/h), ETA: 7.7h
+2025-07-04 09:49:12.100 | INFO     | __main__:report_progress:389 - Progress: 223/25_000 completed (223 new, 0 existing), Overall: 1.0 reqs/s (3_743 reqs/h), Last 60s: 0.9 reqs/s (3_180 reqs/h), ETA: 7.8h
+2025-07-04 09:50:12.104 | INFO     | __main__:report_progress:389 - Progress: 264/25_000 completed (264 new, 0 existing), Overall: 1.0 reqs/s (3_463 reqs/h), Last 60s: 0.7 reqs/s (2_460 reqs/h), ETA: 10.1h
+2025-07-04 09:51:12.106 | INFO     | __main__:report_progress:389 - Progress: 305/25_000 completed (305 new, 0 existing), Overall: 0.9 reqs/s (3_283 reqs/h), Last 60s: 0.7 reqs/s (2_460 reqs/h), ETA: 10.0h
+2025-07-04 09:52:12.108 | INFO     | __main__:report_progress:389 - Progress: 354/25_000 completed (354 new, 0 existing), Overall: 0.9 reqs/s (3_231 reqs/h), Last 60s: 0.8 reqs/s (2_940 reqs/h), ETA: 8.4h
