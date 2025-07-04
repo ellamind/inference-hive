@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data files
+*.arrow
+*.parquet
+*.json
+*.jsonl
+
+# Log files
+*.log
+
+# Virtual environments
+.pixi
