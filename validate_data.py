@@ -10,9 +10,6 @@ from pydantic import TypeAdapter, ValidationError
 from config import load_config_for_validation
 
 
-
-
-
 def validate_input_data_format(ds, input_column_name: str, id_column_name: str, api_type: str):
     """Validate that the input data format matches the expected API type format"""
     if len(ds) == 0:
@@ -86,7 +83,7 @@ def validate_input_data_format(ds, input_column_name: str, id_column_name: str, 
     logger.info(f"Input data format validation passed for api_type='{api_type}' with string ID column '{id_column_name}' using OpenAI's pydantic models")
 
 
-def validate_dataset_from_config(config_path: str, shard: int = None, num_shards: int = None):
+def validate_dataset_from_config(config_path: str, shard: int | None = None, num_shards: int | None = None):
     """
     Validate dataset format based on config file.
     
@@ -106,6 +103,20 @@ def validate_dataset_from_config(config_path: str, shard: int = None, num_shards
         logger.info(f"Loading dataset with load_dataset with kwargs: {config['load_dataset_kwargs']}")
         kwargs = config['load_dataset_kwargs']
         ds = hfds.load_dataset(str(config['dataset_path']), **kwargs)
+
+    # Check if dataset is a DatasetDict and raise error
+    if isinstance(ds, (hfds.DatasetDict, hfds.IterableDatasetDict)):
+        available_splits = list(ds.keys())
+        raise ValueError(
+            f"Dataset is a DatasetDict with splits: {available_splits}. "
+            "Please specify a split in your load_dataset_kwargs (e.g., 'split': 'train')"
+        )
+    
+    # Check if dataset is an IterableDataset and raise error
+    if isinstance(ds, hfds.IterableDataset):
+        raise ValueError(
+            "IterableDataset is currently not supported. Use a regular Dataset instead (streaming=False)."
+        )
 
     # Apply sharding if specified
     if shard is not None and num_shards is not None:

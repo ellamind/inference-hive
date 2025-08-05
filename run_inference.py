@@ -195,6 +195,20 @@ def main(config, args: argparse.Namespace):
         kwargs = config.load_dataset_kwargs or {}
         ds = hfds.load_dataset(str(config.dataset_path), **kwargs)
 
+    # Check if dataset is a DatasetDict and raise error
+    if isinstance(ds, (hfds.DatasetDict, hfds.IterableDatasetDict)):
+        available_splits = list(ds.keys())
+        raise ValueError(
+            f"Dataset is a DatasetDict with splits: {available_splits}. "
+            "Please specify a split in your load_dataset_kwargs (e.g., 'split': 'train') "
+        )
+    
+    # Check if dataset is an IterableDataset and raise error
+    if isinstance(ds, hfds.IterableDataset):
+        raise ValueError(
+            "IterableDataset is currently not supported. Use a regular Dataset instead (streaming=False)."
+        )
+
     ds = ds.shard(num_shards=args.num_shards, index=args.shard)
     logger.info(f"Dataset:\n{ds}")
 
@@ -244,7 +258,11 @@ def main(config, args: argparse.Namespace):
         semaphore = asyncio.Semaphore(config.max_connections)
 
         # Progress tracking
-        total_rows = len(ds)
+        if hasattr(ds, '__len__'):
+            total_rows = len(ds)  # type: ignore
+        else:
+            # For IterableDataset, we can't know the length ahead of time
+            total_rows = None
         processed_rows = 0
         skipped_rows = 0
         progress_lock = asyncio.Lock()
@@ -354,8 +372,11 @@ def main(config, args: argparse.Namespace):
                                 interval_rate_per_hour = interval_rate * 3600
 
                         # Calculate ETA using interval rate (based on remaining API work)
-                        remaining = total_rows - total_completed
-                        eta_interval = remaining / interval_rate if interval_rate > 0 else 0
+                        if total_rows is not None:
+                            remaining = total_rows - total_completed
+                            eta_interval = remaining / interval_rate if interval_rate > 0 else 0
+                        else:
+                            eta_interval = 0  # Unknown for IterableDataset
 
                         # Include failure count if there are any
                         failure_msg = ""
@@ -449,7 +470,7 @@ def main(config, args: argparse.Namespace):
                     # Check completion and exit if done
                     async with progress_lock:
                         total_completed = processed_rows + skipped_rows
-                        if total_completed >= total_rows:
+                        if total_rows is not None and total_completed >= total_rows:
                             logger.info("All rows processed, exiting")
                             break
 

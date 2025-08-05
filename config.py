@@ -9,13 +9,13 @@ class BaseConfig(BaseModel):
     
     # API Configuration
     api_base_url: str = Field(..., description="Base URL for the API server")
-    api_type: str = Field(
-        default="completion", description="Type of API (completion or chat-completion)"
+    api_type: Literal["completion", "chat-completion"] = Field(
+        ..., description="Type of API (completion or chat-completion)"
     )
     model: str = Field(..., description="Model identifier")
 
     # Dataset Configuration
-    dataset_path: str = Field(..., description="Path to the dataset")
+    dataset_path: Path = Field(..., description="Path to the dataset")
     input_column_name: str = Field(
         default="prompt", description="Name of the input column"
     )
@@ -23,11 +23,11 @@ class BaseConfig(BaseModel):
         default="id", description="Name of the ID column. Must contain unique string identifiers for each row."
     )
     use_load_from_disk: bool = Field(
-        default=True, description="Whether to load dataset from disk"
+        ..., description="Whether to load dataset from disk"
     )
 
     # Output Configuration
-    output_path: str = Field(..., description="Path for output files")
+    output_path: Path = Field(..., description="Path for output files")
 
     # Dataset Loading Arguments
     load_dataset_kwargs: Optional[Dict[str, Any]] = Field(
@@ -41,18 +41,19 @@ class BaseConfig(BaseModel):
 
     # Connection Settings
     max_connections: int = Field(
-        default=30, gt=0, description="Maximum number of connections"
+        ..., gt=0, description="Maximum number of connections"
     )
     max_retries: int = Field(default=3, ge=0, description="Maximum number of retries")
 
-    @field_validator("api_type")
+    @field_validator("dataset_path", mode="before")
     @classmethod
-    def validate_api_type(cls, v):
-        """Validate that api_type is one of the allowed values."""
-        allowed_types = ["completion", "chat-completion"]
-        if v not in allowed_types:
-            raise ValueError(f"api_type must be one of {allowed_types}")
-        return v
+    def convert_dataset_path_to_path(cls, v):
+        return Path(v)
+
+    @field_validator("output_path", mode="before")
+    @classmethod
+    def convert_output_path_to_path(cls, v):
+        return Path(v).absolute()
 
     @field_validator("load_dataset_kwargs", "completions_kwargs", mode="before")
     @classmethod
@@ -229,60 +230,20 @@ class JobConfig(BaseConfig):
 class InferenceConfig(BaseConfig):
     """Configuration for distributed offline inference (extends BaseConfig)"""
 
-    # Override API type default for inference
-    api_type: Literal["chat-completion", "completion"] = Field(
-        default="chat-completion",
-        description="API type: 'chat-completion' or 'completion'",
-    )
-
-    # Override input column default for inference (chat-completion uses messages)
-    input_column_name: str = Field(
-        default="messages", description="Name of the input column"
-    )
-
-    # Make id_column_name required for inference (no default)
-    id_column_name: str = Field(
-        ..., description="Name of the ID column"
-    )
-
-    # Override use_load_from_disk default for inference
-    use_load_from_disk: bool = Field(
-        default=False, description="Use load_from_disk to load the dataset"
-    )
-
-    # Override max_connections default for inference
-    max_connections: int = Field(
-        default=100, description="Maximum number of concurrent connections"
-    )
-
-    # Override path fields to be Path objects instead of strings
-    dataset_path: Path = Field(..., description="Path to the dataset")
-    output_path: Path = Field(..., description="Path to save the output")
-
-    # Additional inference-specific fields
+    # Additional inference-specific fields only
     max_consecutive_failures: int = Field(
         default=20, description="Maximum consecutive API failures before terminating"
     )
 
-    @field_validator("dataset_path", mode="before")
-    @classmethod
-    def convert_to_path(cls, v):
-        return Path(v)
 
-    @field_validator("output_path", mode="before")
-    @classmethod
-    def convert_to_abs_path(cls, v):
-        return Path(v).absolute()
-
-
-def load_job_config(config_path: str) -> JobConfig:
+def load_job_config(config_path: str | Path) -> JobConfig:
     """Load and validate job configuration from YAML file"""
     with open(config_path, "r") as f:
         config_data = yaml.safe_load(f)
     return JobConfig(**config_data)
 
 
-def load_inference_config(config_path: str) -> InferenceConfig:
+def load_inference_config(config_path: str | Path) -> InferenceConfig:
     """Load and validate inference configuration from YAML file"""
     with open(config_path, "r") as f:
         config_data = yaml.safe_load(f)
@@ -294,12 +255,17 @@ def load_config_for_validation(config_path: str) -> Dict[str, Any]:
     with open(config_path, "r") as f:
         config_data = yaml.safe_load(f)
     
-    # Extract only the fields we need for validation
+    # Extract only the fields we need for validation (no defaults, explicit config required)
+    required_fields = ['api_type', 'dataset_path', 'use_load_from_disk']
+    for field in required_fields:
+        if field not in config_data:
+            raise ValueError(f"Required field '{field}' missing from config file")
+    
     return {
-        'api_type': config_data.get('api_type', 'chat-completion'),
+        'api_type': config_data['api_type'],
         'dataset_path': Path(config_data['dataset_path']),
-        'input_column_name': config_data.get('input_column_name', 'messages'),
+        'input_column_name': config_data.get('input_column_name', 'prompt'),  # Keep reasonable defaults for column names
         'id_column_name': config_data.get('id_column_name', 'id'),
-        'use_load_from_disk': config_data.get('use_load_from_disk', False),
+        'use_load_from_disk': config_data['use_load_from_disk'],
         'load_dataset_kwargs': config_data.get('load_dataset_kwargs') or {}
     } 

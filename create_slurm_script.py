@@ -14,6 +14,7 @@ SBATCH_TEMPLATE = """#!/bin/bash
 #SBATCH --qos={qos}
 #SBATCH --array=1-{array_size}%{num_inference_servers}
 #SBATCH --nodes={num_nodes_per_inference_server}
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task={cpus_per_node}
 #SBATCH --mem={memory_per_node}
 #SBATCH --gres={gres_per_node}
@@ -40,17 +41,7 @@ CURRENT_SHARD=$((SLURM_ARRAY_TASK_ID - 1))
 COMPLETED_SHARDS_FILE="{log_dir}/shards_completed.log"
 FAILED_SHARDS_FILE="{log_dir}/shards_failed.log"
 
-if [ -f "$COMPLETED_SHARDS_FILE" ]; then
-    # Use grep with word boundaries to match exact shard number
-    if grep -q "^${{CURRENT_SHARD}}$" "$COMPLETED_SHARDS_FILE"; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Shard ${{CURRENT_SHARD}} is already completed. Exiting."
-        exit 0
-    else
-        echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] Shard ${{CURRENT_SHARD}} not found in completed shards. Proceeding with inference."
-    fi
-else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') [INFO] No completed shards log found. Proceeding with inference."
-fi
+
 
 set -e
 
@@ -70,6 +61,19 @@ log_failed_shard() {{
     echo "${{CURRENT_SHARD}} ${{timestamp}} ${{reason}} ${{job_info}} ${{additional_info}}" >> "${{FAILED_SHARDS_FILE}}"
     log "ERROR" "Marked shard ${{CURRENT_SHARD}} as failed: ${{reason}} ${{additional_info}}"
 }}
+
+# Check if this shard is already completed
+if [ -f "$COMPLETED_SHARDS_FILE" ]; then
+    # Use grep with word boundaries to match exact shard number
+    if grep -q "^${{CURRENT_SHARD}}$" "$COMPLETED_SHARDS_FILE"; then
+        log "INFO" "Shard ${{CURRENT_SHARD}} is already completed. Exiting."
+        exit 0
+    else
+        log "INFO" "Shard ${{CURRENT_SHARD}} not found in completed shards. Proceeding with inference."
+    fi
+else
+    log "INFO" "No completed shards log found. Proceeding with inference."
+fi
 
 cleanup() {{
     local signal=$1
@@ -174,16 +178,21 @@ trap 'cleanup SIGUSR1' SIGUSR1 # send before timelimit is hit
 trap 'cleanup SIGTERM' SIGTERM # send by scancel
 
 # Setup env
+
+# Activate pixi environment
+log "INFO" "Activating pixi environment: {pixi_env}"
+eval "$(pixi shell-hook --manifest-path {pixi_manifest} -e {pixi_env} --no-install)"
+log "INFO" "python path: $(which python)"
+
+# Add env exports
 {env_exports}
 export API_BASE_URL="{api_base_url}"
 MASTER_NODE=$(scontrol show hostname ${{SLURM_JOB_NODELIST}} | head -n1)
 export MASTER_NODE
-log "INFO" "python path: $(pixi run --manifest-path {pixi_manifest} -e {pixi_env} --no-install which python)"
 
 # Validate dataset before starting inference server
 log "INFO" "Validating dataset format for shard ${{CURRENT_SHARD}}"
-pixi run --manifest-path {pixi_manifest} -e {pixi_env} --no-install \\
-    python validate_data.py --config {config_path} --shard ${{CURRENT_SHARD}} --num-shards {num_data_shards}
+python validate_data.py --config {config_path} --shard ${{CURRENT_SHARD}} --num-shards {num_data_shards}
 VALIDATION_EXIT_CODE=$?
 
 if [ $VALIDATION_EXIT_CODE -ne 0 ]; then
@@ -196,10 +205,11 @@ log "INFO" "Dataset validation passed for shard ${{CURRENT_SHARD}}"
 
 # Start inference server
 log "INFO" "Starting inference server on ${{SLURM_JOB_NUM_NODES}} nodes"
-INFERENCE_SERVER_LOG="{log_dir}/${{SLURM_ARRAY_JOB_ID:-${{SLURM_JOB_ID}}}}-${{SLURM_ARRAY_TASK_ID}}-${{HOSTNAME}}-inference-server.log"
-setsid pixi run --manifest-path {pixi_manifest} -e {pixi_env} --no-install \\
-    {inference_server_command} \\
-    > "${{INFERENCE_SERVER_LOG}}" 2>&1 &
+INFERENCE_SERVER_LOG="{log_dir}/${{SLURM_ARRAY_JOB_ID:-${{SLURM_JOB_ID}}}}-${{SLURM_ARRAY_TASK_ID}}-%N-inference-server.log"
+INFERENCE_SERVER_COMMAND="{inference_server_command}"
+log "INFO" "Inference server command: ${{INFERENCE_SERVER_COMMAND}}"
+setsid srun --output="$INFERENCE_SERVER_LOG" --error="$INFERENCE_SERVER_LOG" \\
+    bash -c "${{INFERENCE_SERVER_COMMAND}}" &
 INFERENCE_SERVER_PID=$!
 
 # Give the inference server srun command time to actually start
@@ -227,6 +237,17 @@ wait_for_api_server() {{
     
     while [ $attempt -lt $max_attempts ]; do
         log "INFO" "Health check attempt $((attempt + 1))/${{max_attempts}} for ${{health_url}}"
+        
+        # Check if the inference server srun process is still running
+        if ! kill -0 $INFERENCE_SERVER_PID 2>/dev/null; then
+            log "ERROR" "Inference server srun process (PID: $INFERENCE_SERVER_PID) has terminated during health checks"
+            # Wait for the process to get its exit code
+            wait $INFERENCE_SERVER_PID 2>/dev/null
+            INFERENCE_SERVER_EXIT_CODE=$?
+            log "ERROR" "Inference server srun command exited with code $INFERENCE_SERVER_EXIT_CODE"
+            log_failed_shard "inference_server_terminated_during_healthcheck" "srun process died during health checks with exit code $INFERENCE_SERVER_EXIT_CODE"
+            return 1
+        fi
         
         if curl -s --connect-timeout 5 --max-time 10 "${{health_url}}" >/dev/null 2>&1; then
             log "INFO" "Inference server is healthy and ready!"
@@ -256,8 +277,7 @@ fi
 log "INFO" "Running inference"
 INFERENCE_PROGRESS_LOG="{log_dir}/${{SLURM_ARRAY_JOB_ID:-${{SLURM_JOB_ID}}}}-${{SLURM_ARRAY_TASK_ID}}-${{HOSTNAME}}-inference-stats.jsonl"
 # Start inference in a new process group so we can kill the entire group
-setsid pixi run --manifest-path {pixi_manifest} -e {pixi_env} --no-install \\
-    python run_inference.py --config {config_path} --num-shards {num_data_shards} --shard $((SLURM_ARRAY_TASK_ID - 1)) --log-file $INFERENCE_PROGRESS_LOG &
+setsid python run_inference.py --config {config_path} --num-shards {num_data_shards} --shard $((SLURM_ARRAY_TASK_ID - 1)) --log-file $INFERENCE_PROGRESS_LOG &
 INFERENCE_PID=$!
 wait $INFERENCE_PID
 INFERENCE_EXIT_CODE=$?

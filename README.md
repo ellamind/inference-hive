@@ -114,7 +114,7 @@ and we do not recommend changing that.
 Before using your configuration file, validate it to catch errors early:
 
 ```bash
-pixi run python validate_config.py my_config.yaml
+pixi run python validate_config.py --config my_config.yaml
 ```
 
 The config validation script will check:
