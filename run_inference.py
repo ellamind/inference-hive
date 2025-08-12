@@ -2,16 +2,13 @@ import argparse
 import asyncio
 import json
 import os
-from pathlib import Path
 import signal
 import time
 
-import datasets as hfds
 from loguru import logger
 from openai import AsyncOpenAI
-import polars as pl
 
-from data_utils import DatasetReader, DatasetWriter, NoDatasetFilesError
+from data_utils import DatasetReader, DatasetWriter, NoDatasetFilesError, load_data
 from schemas import CHAT_COMPLETION_SCHEMA, COMPLETION_SCHEMA
 from validate_data import validate_input_data_format
 from config import load_inference_config
@@ -185,31 +182,7 @@ class ProgressLogger:
 
 def main(config, args: argparse.Namespace):
     
-    if config.use_load_from_disk:
-        logger.info("Loading dataset with load_from_disk")
-        ds = hfds.load_from_disk(config.dataset_path)
-    else:
-        logger.info(
-            f"Loading dataset with load_dataset with kwargs: {config.load_dataset_kwargs}"
-        )
-        kwargs = config.load_dataset_kwargs or {}
-        ds = hfds.load_dataset(str(config.dataset_path), **kwargs)
-
-    # Check if dataset is a DatasetDict and raise error
-    if isinstance(ds, (hfds.DatasetDict, hfds.IterableDatasetDict)):
-        available_splits = list(ds.keys())
-        raise ValueError(
-            f"Dataset is a DatasetDict with splits: {available_splits}. "
-            "Please specify a split in your load_dataset_kwargs (e.g., 'split': 'train') "
-        )
-    
-    # Check if dataset is an IterableDataset and raise error
-    if isinstance(ds, hfds.IterableDataset):
-        raise ValueError(
-            "IterableDataset is currently not supported. Use a regular Dataset instead (streaming=False)."
-        )
-
-    ds = ds.shard(num_shards=args.num_shards, index=args.shard)
+    ds = load_data(config, args.shard, args.num_shards)
     logger.info(f"Dataset:\n{ds}")
 
     # Validate input data format matches API type expectations
@@ -217,19 +190,13 @@ def main(config, args: argparse.Namespace):
 
     existing_ids = set()
     try:
-        reader = DatasetReader(config.output_path)
+        reader = DatasetReader(config.output_path, columns=['id'])
         logger.info(
             f"Found existing output in {config.output_path} with {len(reader):_} rows"
         )
         logger.info("Reading existing IDs")
-        existing_ids.update(
-            reader.get_dataframe()
-            .select(pl.col("id"))
-            .unique()
-            .collect()
-            .to_series()
-            .to_list()
-        )
+        for row in reader:
+            existing_ids.add(row["id"])
         logger.info(f"Existing IDs: {len(existing_ids):_}")
     except NoDatasetFilesError:
         logger.info(f"No existing output found in {config.output_path}")
@@ -258,11 +225,7 @@ def main(config, args: argparse.Namespace):
         semaphore = asyncio.Semaphore(config.max_connections)
 
         # Progress tracking
-        if hasattr(ds, '__len__'):
-            total_rows = len(ds)  # type: ignore
-        else:
-            # For IterableDataset, we can't know the length ahead of time
-            total_rows = None
+        total_rows = len(ds)
         processed_rows = 0
         skipped_rows = 0
         progress_lock = asyncio.Lock()
@@ -372,11 +335,8 @@ def main(config, args: argparse.Namespace):
                                 interval_rate_per_hour = interval_rate * 3600
 
                         # Calculate ETA using interval rate (based on remaining API work)
-                        if total_rows is not None:
-                            remaining = total_rows - total_completed
-                            eta_interval = remaining / interval_rate if interval_rate > 0 else 0
-                        else:
-                            eta_interval = 0  # Unknown for IterableDataset
+                        remaining = total_rows - total_completed
+                        eta_interval = remaining / interval_rate if interval_rate > 0 else 0
 
                         # Include failure count if there are any
                         failure_msg = ""
@@ -564,7 +524,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--progress-report-interval", 
         type=int, 
-        default=60, 
+        default=60,
         help="Interval in seconds for progress reports"
     )
     parser.add_argument(

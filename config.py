@@ -15,6 +15,9 @@ class BaseConfig(BaseModel):
     model: str = Field(..., description="Model identifier")
 
     # Dataset Configuration
+    dataset_type: Literal["hf", "hf-disk", "parquet"] = Field(
+        ..., description="Type of dataset to load. Must be one of 'hf', 'hf-disk', 'parquet'."
+    )
     dataset_path: Path = Field(..., description="Path to the dataset")
     input_column_name: str = Field(
         default="prompt", description="Name of the input column"
@@ -22,16 +25,13 @@ class BaseConfig(BaseModel):
     id_column_name: str = Field(
         default="id", description="Name of the ID column. Must contain unique string identifiers for each row."
     )
-    use_load_from_disk: bool = Field(
-        ..., description="Whether to load dataset from disk"
-    )
 
     # Output Configuration
     output_path: Path = Field(..., description="Path for output files")
 
     # Dataset Loading Arguments
-    load_dataset_kwargs: Optional[Dict[str, Any]] = Field(
-        default=None, description="Additional dataset loading arguments"
+    dataset_kwargs: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional dataset loading arguments that will be passed to the dataset loading function."
     )
 
     # Completion Arguments
@@ -55,7 +55,7 @@ class BaseConfig(BaseModel):
     def convert_output_path_to_path(cls, v):
         return Path(v).absolute()
 
-    @field_validator("load_dataset_kwargs", "completions_kwargs", mode="before")
+    @field_validator("dataset_kwargs", "completions_kwargs", mode="before")
     @classmethod
     def convert_none_to_dict(cls, v):
         return v if v is not None else {}
@@ -250,22 +250,25 @@ def load_inference_config(config_path: str | Path) -> InferenceConfig:
     return InferenceConfig(**config_data)
 
 
-def load_config_for_validation(config_path: str) -> Dict[str, Any]:
-    """Load and extract only the fields needed for data validation"""
+def load_config_for_validation(config_path: str) -> BaseConfig:
+    """Load and validate configuration for data validation purposes"""
     with open(config_path, "r") as f:
         config_data = yaml.safe_load(f)
     
-    # Extract only the fields we need for validation (no defaults, explicit config required)
-    required_fields = ['api_type', 'dataset_path', 'use_load_from_disk']
-    for field in required_fields:
-        if field not in config_data:
-            raise ValueError(f"Required field '{field}' missing from config file")
-    
-    return {
+    # Extract only the fields we need for validation
+    # We need to provide minimal required fields for BaseConfig validation
+    validation_config = {
         'api_type': config_data['api_type'],
-        'dataset_path': Path(config_data['dataset_path']),
-        'input_column_name': config_data.get('input_column_name', 'prompt'),  # Keep reasonable defaults for column names
+        'dataset_type': config_data['dataset_type'],
+        'dataset_path': config_data['dataset_path'],
+        'input_column_name': config_data.get('input_column_name', 'prompt'),
         'id_column_name': config_data.get('id_column_name', 'id'),
-        'use_load_from_disk': config_data['use_load_from_disk'],
-        'load_dataset_kwargs': config_data.get('load_dataset_kwargs') or {}
-    } 
+        'dataset_kwargs': config_data.get('dataset_kwargs'),
+        # Minimal required fields for BaseConfig - these won't be used for validation
+        'api_base_url': config_data.get('api_base_url', 'dummy'),
+        'model': config_data.get('model', 'dummy'),
+        'output_path': config_data.get('output_path', '/tmp/dummy'),
+        'max_connections': config_data.get('max_connections', 1),
+    }
+    
+    return BaseConfig(**validation_config) 
