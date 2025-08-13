@@ -175,6 +175,53 @@ class DatasetReader:
     # def get_dataframe(self) -> pl.LazyFrame:
     #     return pl.scan_parquet(self.dataset_files)
 
+def patch_iter(ds, config):
+    """
+    Monkey patch the dataset's __iter__ method to apply a UDF function to each row.
+    
+    Args:
+        ds: The dataset object (could be HuggingFace Dataset or DatasetReader)
+        config: Configuration object containing apply_udf and apply_udf_kwargs
+        
+    Returns:
+        The dataset with patched __iter__ method
+    """
+    # Import the UDF module and get the specified function
+    try:
+        import udf
+        udf_func = getattr(udf, config.apply_udf)
+    except ImportError:
+        logger.error("Could not import udf module. Make sure udf.py exists in the project root.")
+        raise
+    except AttributeError:
+        logger.error(f"UDF function '{config.apply_udf}' not found in udf.py")
+        raise
+    
+    # Get UDF kwargs, defaulting to empty dict if None
+    udf_kwargs = config.apply_udf_kwargs or {}
+    
+    # Store the original __iter__ method
+    original_iter = ds.__iter__
+    
+    def patched_iter(self):
+        """New __iter__ method that applies the UDF to each row"""
+        for row in original_iter():
+            try:
+                # Apply the UDF function with kwargs
+                transformed_row = udf_func(row, **udf_kwargs)
+                yield transformed_row
+            except Exception as e:
+                logger.error(f"Error applying UDF '{config.apply_udf}' to row: {e}")
+                # Re-raise the exception to stop processing
+                raise
+    
+    # Monkey patch the __iter__ method using proper descriptor protocol
+    ds.__iter__ = patched_iter.__get__(ds, ds.__class__)
+    
+    logger.info(f"Successfully patched dataset __iter__ method with UDF: {config.apply_udf}")
+    
+    return ds
+
 def load_data(config, shard: int = None, num_shards: int = None):
     logger.info(
         f"Loading dataset with with kwargs: {config.dataset_kwargs}"
@@ -203,10 +250,13 @@ def load_data(config, shard: int = None, num_shards: int = None):
             )
         if shard is not None and num_shards is not None:
             ds = ds.shard(num_shards=num_shards, index=shard)
-        return ds
     
     elif config.dataset_type == "parquet":
         logger.info("Loading parquet dataset with DatasetReader")
-        return DatasetReader(config.dataset_path, shard=shard, num_shards=num_shards, **kwargs)
+        ds = DatasetReader(config.dataset_path, shard=shard, num_shards=num_shards, **kwargs)
     else:
         raise ValueError(f"Invalid dataset type: {config.dataset_type}. Supported types are: 'hf', 'hf-disk', 'parquet'")
+    if config.apply_udf:
+        return patch_iter(ds, config)
+    
+    return ds

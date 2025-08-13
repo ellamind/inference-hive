@@ -39,6 +39,14 @@ class BaseConfig(BaseModel):
         default=None, description="Arguments for completions"
     )
 
+    # UDF Configuration
+    apply_udf: Optional[str] = Field(
+        default=None, description="Name of the UDF function in udf.py to apply to the dataset"
+    )
+    apply_udf_kwargs: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional kwargs to pass to the UDF function"
+    )
+
     # Connection Settings
     max_connections: int = Field(
         ..., gt=0, description="Maximum number of connections"
@@ -55,7 +63,7 @@ class BaseConfig(BaseModel):
     def convert_output_path_to_path(cls, v):
         return Path(v).absolute()
 
-    @field_validator("dataset_kwargs", "completions_kwargs", mode="before")
+    @field_validator("dataset_kwargs", "completions_kwargs", "apply_udf_kwargs", mode="before")
     @classmethod
     def convert_none_to_dict(cls, v):
         return v if v is not None else {}
@@ -264,6 +272,8 @@ def load_config_for_validation(config_path: str) -> BaseConfig:
         'input_column_name': config_data.get('input_column_name', 'prompt'),
         'id_column_name': config_data.get('id_column_name', 'id'),
         'dataset_kwargs': config_data.get('dataset_kwargs'),
+        'apply_udf': config_data.get('apply_udf'),
+        'apply_udf_kwargs': config_data.get('apply_udf_kwargs'),
         # Minimal required fields for BaseConfig - these won't be used for validation
         'api_base_url': config_data.get('api_base_url', 'dummy'),
         'model': config_data.get('model', 'dummy'),

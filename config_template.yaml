@@ -63,10 +63,13 @@ model: "Qwen/Qwen3-4B"
 # === Dataset Configuration ===
 dataset_type: "hf" # must one of "hf", "hf-disk" or "parquet"
 dataset_path: "" # hf identifier or local path
-# input_column_name must contain strings for completion or messages for chat-completion.
-input_column_name: "messages"
 # id_column_name must contain unique string identifiers for each row. The IDs will be used to match responses with input rows.
 id_column_name: "id"
+# input_column_name must contain strings for completion or messages for chat-completion.
+input_column_name: "messages"
+apply_udf: # Can be set to the name of the UDF function in udf.py to apply to the dataset.
+apply_udf_kwargs: {} # kwargs to pass to the UDF function.
+
 
 # Dataset Loading Arguments
 dataset_kwargs:
