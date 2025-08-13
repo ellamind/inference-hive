@@ -381,6 +381,16 @@ def main():
         logger.warning(f"Could not copy config file: {e}")
     config_dict["config_path"] = str(config_copy_path)
 
+    # Copy udf.py file to output directory for reproducibility if apply_udf is used
+    if config.apply_udf:
+        udf_path = Path(__file__).parent / "udf.py"
+        udf_copy_path = output_dir / "udf.py"
+        try:
+            shutil.copy2(udf_path, udf_copy_path)
+            logger.info(f"UDF file copied to: {udf_copy_path}")
+        except Exception as e:
+            logger.warning(f"Could not copy UDF file: {e}")
+
     sbatch_script = SBATCH_TEMPLATE.format(**config_dict)
     
     job_script_path = output_dir / f"{config_dict['job_name']}.slurm"
