@@ -4,7 +4,6 @@ from typing import Any, Dict
 import datasets as hfds
 from loguru import logger
 import numpy as np
-# import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.dataset as pads
@@ -172,21 +171,36 @@ class DatasetReader:
     def get_schema(self) -> pa.Schema:
         return self.ds.schema
 
-    # def get_dataframe(self) -> pl.LazyFrame:
-    #     return pl.scan_parquet(self.dataset_files)
-
-def patch_iter(ds, config):
-    """
-    Monkey patch the dataset's __iter__ method to apply a UDF function to each row.
+class DatasetWrapper:
     
-    Args:
-        ds: The dataset object (could be HuggingFace Dataset or DatasetReader)
-        config: Configuration object containing apply_udf and apply_udf_kwargs
-        
-    Returns:
-        The dataset with patched __iter__ method
-    """
-    # Import the UDF module and get the specified function
+    def __init__(self, dataset, udf_func, udf_kwargs=None):
+        self._wrapped_dataset = dataset
+        self._udf_func = udf_func
+        self._udf_kwargs = udf_kwargs or {}
+    
+    def __getattr__(self, name):
+        return getattr(self._wrapped_dataset, name)
+    
+    def __iter__(self):
+        """
+        Override __iter__ to apply the UDF function to each row.
+        """
+        for row in self._wrapped_dataset:
+            try:
+                transformed_row = self._udf_func(row, **self._udf_kwargs)
+                yield transformed_row
+            except Exception as e:
+                logger.error(f"Error applying UDF to row: {e}")
+                raise
+    
+    def __len__(self):
+        return len(self._wrapped_dataset)
+    
+    def __str__(self):
+        return f"DatasetWrapper({self._wrapped_dataset})"
+    
+
+def wrap_with_udf(ds, config):
     try:
         import udf
         udf_func = getattr(udf, config.apply_udf)
@@ -197,30 +211,11 @@ def patch_iter(ds, config):
         logger.error(f"UDF function '{config.apply_udf}' not found in udf.py")
         raise
     
-    # Get UDF kwargs, defaulting to empty dict if None
     udf_kwargs = config.apply_udf_kwargs or {}
     
-    # Store the original __iter__ method
-    original_iter = ds.__iter__
+    logger.info(f"Wrapping dataset with UDF: {config.apply_udf}, kwargs: {udf_kwargs}")
     
-    def patched_iter(self):
-        """New __iter__ method that applies the UDF to each row"""
-        for row in original_iter():
-            try:
-                # Apply the UDF function with kwargs
-                transformed_row = udf_func(row, **udf_kwargs)
-                yield transformed_row
-            except Exception as e:
-                logger.error(f"Error applying UDF '{config.apply_udf}' to row: {e}")
-                # Re-raise the exception to stop processing
-                raise
-    
-    # Monkey patch the __iter__ method using proper descriptor protocol
-    ds.__iter__ = patched_iter.__get__(ds, ds.__class__)
-    
-    logger.info(f"Successfully patched dataset __iter__ method with UDF: {config.apply_udf}")
-    
-    return ds
+    return DatasetWrapper(ds, udf_func, udf_kwargs)
 
 def load_data(config, shard: int = None, num_shards: int = None):
     logger.info(
@@ -257,6 +252,5 @@ def load_data(config, shard: int = None, num_shards: int = None):
     else:
         raise ValueError(f"Invalid dataset type: {config.dataset_type}. Supported types are: 'hf', 'hf-disk', 'parquet'")
     if config.apply_udf:
-        return patch_iter(ds, config)
-    
+        ds = wrap_with_udf(ds, config)
     return ds
