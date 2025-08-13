@@ -56,7 +56,7 @@ health_check_interval_seconds: 20  # Interval between health check attempts
 # make sure port is the same as in inference_server_command.
 api_base_url: "http://localhost:64776/v1"
 api_type: "chat-completion"  # "chat-completion" or "completion"
-# make sure model is the same as in inference_server_command.
+# make sure model is set to the exact same string as in inference_server_command. 
 model: "Qwen/Qwen3-4B"
 
 
@@ -67,8 +67,8 @@ dataset_path: "" # hf identifier or local path
 id_column_name: "id"
 # input_column_name must contain strings for completion or messages for chat-completion.
 input_column_name: "messages"
-apply_udf: # Can be set to the name of the UDF function in udf.py to apply to the dataset.
-apply_udf_kwargs: {} # kwargs to pass to the UDF function.
+apply_udf: # Can be set to a name of a UDF in udf.py to apply to dataset rows.
+apply_udf_kwargs: {} # kwargs to pass to the UDF.
 
 
 # Dataset Loading Arguments
