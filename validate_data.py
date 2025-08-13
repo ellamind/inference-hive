@@ -10,7 +10,7 @@ from config import load_config_for_validation
 from data_utils import load_data
 
 
-def validate_input_data_format(ds, input_column_name: str, id_column_name: str, api_type: str):
+def validate_input_data_format(ds, input_column_name: str, id_column_name: str, api_type: str, log_samples: bool = True):
     """Validate that the input data format matches the expected API type format"""
     if len(ds) == 0:
         logger.warning("Empty dataset, skipping format validation")
@@ -82,30 +82,31 @@ def validate_input_data_format(ds, input_column_name: str, id_column_name: str, 
     
     logger.info(f"Input data format validation passed for api_type='{api_type}' with string ID column '{id_column_name}' using OpenAI's pydantic models")
     
-    logger.info("Sample rows:")
-    logger.info("=" * 80)
-    
-    for i, row in enumerate(sample_rows):
-        row_id = row[id_column_name]
-        data = row[input_column_name]
+    if log_samples:
+        logger.info("Sample rows:")
+        logger.info("=" * 80)
         
-        logger.info("-" * 40)
-        logger.info(f"Sample {i+1}/{len(sample_rows)}")
-        logger.info(f"{row_id=}")
-        
-        if api_type == "completion":
-            # For completion API, show the prompt string
-            logger.info(f"Prompt:\n{data}")
-        
-        elif api_type == "chat-completion":
-            # For chat-completion API, show formatted messages
-            logger.info("Messages:")
-            for j, message in enumerate(data):
-                role = message['role']
-                content = message['content']
-                logger.info(f"[{j+1}]\n{role=}\n{content=}")
-        
-    logger.info("=" * 80)
+        for i, row in enumerate(sample_rows):
+            row_id = row[id_column_name]
+            data = row[input_column_name]
+            
+            logger.info("-" * 40)
+            logger.info(f"Sample {i+1}/{len(sample_rows)}")
+            logger.info(f"{row_id=}")
+            
+            if api_type == "completion":
+                # For completion API, show the prompt string
+                logger.info(f"Prompt:\n{data}")
+            
+            elif api_type == "chat-completion":
+                # For chat-completion API, show formatted messages
+                logger.info("Messages:")
+                for j, message in enumerate(data):
+                    role = message['role']
+                    content = message['content']
+                    logger.info(f"[{j+1}]\n{role=}\n{content=}")
+            
+        logger.info("=" * 80)
     
 
 def validate_dataset_from_config(config_path: str, shard: int | None = None, num_shards: int | None = None):

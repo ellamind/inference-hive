@@ -186,7 +186,7 @@ def main(config, args: argparse.Namespace):
     logger.info(f"Dataset:\n{ds}")
 
     # Validate input data format matches API type expectations
-    validate_input_data_format(ds, config.input_column_name, config.id_column_name, config.api_type)
+    validate_input_data_format(ds, config.input_column_name, config.id_column_name, config.api_type, log_samples=False)
 
     existing_ids = set()
     try:
