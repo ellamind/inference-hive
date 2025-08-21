@@ -17,14 +17,15 @@ def _setup_signal_handlers(writer=None):
     """Setup signal handlers to gracefully close writer and exit cleanly"""
     def handle_shutdown_signal(signum, frame):
         signal_name = signal.Signals(signum).name
-        logger.info(f"Received {signal_name}. Closing writer, shutting down.")
+        logger.info(f"Received {signal_name}. Emergency shutdown - preserving checkpoints for recovery.")
         if writer is not None and not writer._closed:
             try:
-                writer.close()
-                logger.info("Writer closed successfully.")
+                # Use emergency mode for fast shutdown in signal handlers
+                writer.close(emergency=True)
+                logger.info("Writer emergency close completed successfully.")
             except Exception as e:
-                logger.error(f"Error closing writer: {e}")
-        logger.info(f"Exiting due to {signal_name}")
+                logger.error(f"Error during emergency close: {e}")
+        logger.info(f"Exiting due to {signal_name}. Checkpoint files preserved for recovery.")
         os._exit(1)
     
     signal.signal(signal.SIGTERM, handle_shutdown_signal)
