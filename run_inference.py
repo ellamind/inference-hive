@@ -20,7 +20,7 @@ def _setup_signal_handlers(writer=None):
         logger.info(f"Received {signal_name}. Emergency shutdown - preserving checkpoints for recovery.")
         if writer is not None and not writer._closed:
             try:
-                # Use emergency mode for fast shutdown in signal handlers
+                # Use emergency mode to shutdown asap.
                 writer.close(emergency=True)
                 logger.info("Writer emergency close completed successfully.")
             except Exception as e:
@@ -181,26 +181,41 @@ class ProgressLogger:
         self.file_handle.flush()
 
 
-def main(config, args: argparse.Namespace):
-    
+def _load_and_validate_dataset(config, args: argparse.Namespace):
+    """Load dataset and validate format, returning dataset and total length."""
     ds = load_data(config, args.shard, args.num_shards)
     logger.info(f"Dataset:\n{ds}")
+    validate_input_data_format(
+        ds,
+        config.input_column_name,
+        config.id_column_name,
+        config.api_type,
+        log_samples=False,
+    )
+    return ds
 
-    # Validate input data format matches API type expectations
-    validate_input_data_format(ds, config.input_column_name, config.id_column_name, config.api_type, log_samples=False)
 
+def _read_existing_ids(output_path: str) -> set:
+    """Read existing IDs from an existing output dataset directory."""
     existing_ids = set()
     try:
-        reader = DatasetReader(config.output_path, columns=['id'])
+        reader = DatasetReader(output_path, columns=['id'])
         logger.info(
-            f"Found existing output in {config.output_path} with {len(reader):_} rows"
+            f"Found existing output in {output_path} with {len(reader):_} rows"
         )
         logger.info("Reading existing IDs")
         for row in reader:
             existing_ids.add(row["id"])
         logger.info(f"Existing IDs: {len(existing_ids):_}")
     except NoDatasetFilesError:
-        logger.info(f"No existing output found in {config.output_path}")
+        logger.info(f"No existing output found in {output_path}")
+    return existing_ids
+
+
+async def run_inference_async(config, args: argparse.Namespace):
+    """Run the asynchronous inference pipeline."""
+    ds = _load_and_validate_dataset(config, args)
+    existing_ids = _read_existing_ids(config.output_path)
 
     api_key = os.environ.get("API_KEY", "EMPTY")
     client = AsyncOpenAI(
@@ -213,7 +228,7 @@ def main(config, args: argparse.Namespace):
         else COMPLETION_SCHEMA
     )
     writer = DatasetWriter(dataset_dir=config.output_path, schema=schema, shard=args.shard)
-    
+
     # Setup signal handlers to ensure writer is closed on shutdown
     _setup_signal_handlers(writer)
 
@@ -230,7 +245,7 @@ def main(config, args: argparse.Namespace):
         processed_rows = 0
         skipped_rows = 0
         progress_lock = asyncio.Lock()
-        first_completion_time = None  # Track when first API call completes
+        first_completion_time = None
 
         # Track progress for interval-based rate calculation
         last_report_time = None
@@ -242,11 +257,10 @@ def main(config, args: argparse.Namespace):
             nonlocal processed_rows, skipped_rows, first_completion_time
 
             async with semaphore:
-                # row_id is guaranteed to be a string from validation
                 if row_id in existing_ids:
                     async with progress_lock:
                         skipped_rows += 1
-                    return  # Skip this request since we already have it
+                    return
 
                 try:
                     if config.api_type == "chat-completion":
@@ -260,7 +274,6 @@ def main(config, args: argparse.Namespace):
                     else:
                         raise ValueError(f"Invalid API type: {config.api_type}")
 
-                    # Success! Record it and process response
                     api_failure_counter.record_success()
                     output_dict = {"response": response.model_dump(
                         exclude=response.model_extra.keys()
@@ -268,20 +281,17 @@ def main(config, args: argparse.Namespace):
                     output_dict["id"] = row_id
                     writer.add_row(output_dict)
 
-                    # Extract token usage and add to progress logger
                     if progress_logger and hasattr(response, 'usage') and response.usage:
                         usage_dict = response.usage.model_dump() if hasattr(response.usage, 'model_dump') else response.usage
                         progress_logger.add_token_usage(usage_dict)
 
                     async with progress_lock:
                         processed_rows += 1
-                        # Track when first API call completes for better overall rate calculation
                         current_time = time.time()
                         if first_completion_time is None:
                             first_completion_time = current_time
 
                 except Exception as e:
-                    # Check if this looks like an API connectivity issue
                     error_str = str(e).lower()
                     is_api_error = any(
                         keyword in error_str
@@ -298,34 +308,26 @@ def main(config, args: argparse.Namespace):
                     )
 
                     if is_api_error:
-                        # Record failure and potentially terminate if too many
                         api_failure_counter.record_failure()
                         logger.warning(f"API connection issue: {e}")
-                        raise  # Let OpenAI client handle retries
+                        raise
                     else:
-                        # This might be a data/format issue, log and skip
                         logger.error(f"API Error, skipping request: {e}")
                         async with progress_lock:
                             skipped_rows += 1
 
         async def run_inference():
             async def report_progress(is_final=False):
-                """Report current progress with both overall and interval rates"""
                 nonlocal last_report_time, last_report_processed_rows
-                
                 async with progress_lock:
                     current_time = time.time()
-                    
-                    # Calculate total completed (newly processed + skipped from existing)
                     total_completed = processed_rows + skipped_rows
 
                     if processed_rows > 0 and first_completion_time is not None:
-                        # Overall average rate since first API completion (API processing only, excludes skipped rows)
                         elapsed_since_first_completion = current_time - first_completion_time
                         overall_rate = processed_rows / elapsed_since_first_completion
                         overall_rate_per_hour = overall_rate * 3600
 
-                        # Calculate interval rate (rate in the last logging period)
                         interval_rate = 0.0
                         interval_rate_per_hour = 0.0
                         if last_report_time is not None:
@@ -335,11 +337,9 @@ def main(config, args: argparse.Namespace):
                                 interval_rate = interval_processed / interval_duration
                                 interval_rate_per_hour = interval_rate * 3600
 
-                        # Calculate ETA using interval rate (based on remaining API work)
                         remaining = total_rows - total_completed
                         eta_interval = remaining / interval_rate if interval_rate > 0 else 0
 
-                        # Include failure count if there are any
                         failure_msg = ""
                         if api_failure_counter.consecutive_failures > 0:
                             failure_msg = f", {api_failure_counter.consecutive_failures} consecutive failures"
@@ -347,7 +347,6 @@ def main(config, args: argparse.Namespace):
                         prefix = "Final Progress" if is_final else "Progress"
 
                         if is_final:
-                            # For final report, show overall stats
                             logger.info(
                                 f"{prefix}: {total_completed:_}/{total_rows:_} completed "
                                 f"({processed_rows:_} new, {skipped_rows:_} existing), "
@@ -355,19 +354,16 @@ def main(config, args: argparse.Namespace):
                                 flush=True
                             )
                         else:
-                            # For progress updates, show both rates and ETA based on interval performance
-                            # Initialize interval tracking on first report if not set
                             if last_report_time is None:
                                 last_report_time = first_completion_time
                                 last_report_processed_rows = 0
-                                # Recalculate interval rate with proper initialization
                                 interval_duration = current_time - last_report_time
                                 if interval_duration > 0:
                                     interval_processed = processed_rows - last_report_processed_rows
                                     interval_rate = interval_processed / interval_duration
                                     interval_rate_per_hour = interval_rate * 3600
                                     eta_interval = remaining / interval_rate if interval_rate > 0 else 0
-                            
+
                             logger.info(
                                 f"{prefix}: {total_completed:_}/{total_rows:_} completed "
                                 f"({processed_rows:_} new, {skipped_rows:_} existing), "
@@ -376,20 +372,17 @@ def main(config, args: argparse.Namespace):
                                 f"ETA: {format_time(eta_interval)}{failure_msg}",
                                 flush=True
                             )
-                        
-                        # Log structured progress data if logger is available (before updating tracking variables)
+
                         if progress_logger and processed_rows > 0 and first_completion_time is not None:
-                            # Calculate interval values using the PREVIOUS tracking variables
                             if last_report_time is not None and not is_final:
                                 interval_duration = current_time - last_report_time
                                 interval_new = processed_rows - last_report_processed_rows
-                                interval_existing = 0  # We don't track interval existing separately, only total
+                                interval_existing = 0
                             else:
-                                # For final report or first report, use overall values
                                 interval_duration = current_time - first_completion_time
                                 interval_new = processed_rows
                                 interval_existing = skipped_rows
-                            
+
                             progress_logger.log_progress(
                                 completed=total_completed,
                                 total=total_rows,
@@ -404,18 +397,14 @@ def main(config, args: argparse.Namespace):
                                 interval_existing=interval_existing,
                                 start_time=first_completion_time
                             )
-                        
-                        # Reset interval token counters for next reporting cycle (after logging, but not on final report)
+
                         if progress_logger and not is_final:
                             progress_logger.reset_interval_tokens()
-                        
-                        # Update tracking variables for next interval (after using them for calculations)
+
                         if not is_final:
                             last_report_time = current_time
                             last_report_processed_rows = processed_rows
-                    
                     elif processed_rows == 0:
-                        # No API calls completed yet
                         logger.info(
                             f"Progress: {total_completed:_}/{total_rows:_} completed "
                             f"({processed_rows:_} new, {skipped_rows:_} existing), "
@@ -425,10 +414,8 @@ def main(config, args: argparse.Namespace):
 
             async def progress_reporter():
                 while True:
-                    await asyncio.sleep(args.progress_report_interval)  # report progress every progress_report_interval seconds
+                    await asyncio.sleep(args.progress_report_interval)
                     await report_progress()
-
-                    # Check completion and exit if done
                     async with progress_lock:
                         total_completed = processed_rows + skipped_rows
                         if total_rows is not None and total_completed >= total_rows:
@@ -440,7 +427,7 @@ def main(config, args: argparse.Namespace):
                     try:
                         row = await queue.get()
                         if row == "DONE":
-                            queue.task_done()  # Mark DONE task as done
+                            queue.task_done()
                             break
 
                         await request(row[config.input_column_name], row[config.id_column_name])
@@ -453,35 +440,24 @@ def main(config, args: argparse.Namespace):
                         logger.error(f"Error processing row: {e}")
                         queue.task_done()
 
-            # Create queue and workers
             queue = asyncio.Queue(maxsize=config.max_connections * 10)
-            workers = [
-                asyncio.create_task(worker()) for _ in range(config.max_connections)
-            ]
+            workers = [asyncio.create_task(worker()) for _ in range(config.max_connections)]
             asyncio.create_task(progress_reporter())
 
-            # Producer: add rows to queue
             async def producer():
                 for row in ds:
                     await queue.put(row)
-                # Send DONE signal to all workers
                 for _ in workers:
                     await queue.put("DONE")
 
             logger.info("Starting inference")
             start_time = time.time()
 
-            # Start producer and wait for completion
             producer_task = asyncio.create_task(producer())
             await producer_task
-
-            # Wait for all tasks to be processed
             await queue.join()
-
-            # Final progress report
             await report_progress(is_final=True)
 
-            # Final report
             total_time = time.time() - start_time
             if first_completion_time is not None:
                 processing_time = time.time() - first_completion_time
@@ -496,21 +472,27 @@ def main(config, args: argparse.Namespace):
 
         if progress_logger:
             with progress_logger:
-                asyncio.run(run_inference())
+                await run_inference()
         else:
-            asyncio.run(run_inference())
+            await run_inference()
+
+        logger.info("Closing writer...")
+        writer.close()
+        logger.info("Writer closed successfully")
 
     except Exception as e:
         logger.error(f"An error occurred during inference: {e}")
+        if writer is not None and not writer._closed:
+            logger.info("Closing writer with emergency flag...")
+            writer.close(emergency=True)
+            logger.info("Writer emergency close completed successfully.")
         raise
     finally:
-        # Always ensure the writer is closed properly
-        if writer is not None and not writer._closed:
-            logger.info("Closing writer...")
-            writer.close()
-            logger.info("Writer closed successfully")
-        
         logger.info("Shutdown completed")
+
+
+def main(config, args: argparse.Namespace):
+    asyncio.run(run_inference_async(config, args))
 
 
 if __name__ == "__main__":

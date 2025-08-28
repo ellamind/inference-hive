@@ -124,7 +124,7 @@ def validate_dataset_from_config(config_path: str, shard: int | None = None, num
     logger.info("Loading dataset for validation...")
     logger.info(f"Config: {config}")
     ds = load_data(config, shard, num_shards)
-    logger.info(f"Dataset loaded: {len(ds)} rows")
+    logger.info(f"Dataset {shard=} loaded: {len(ds)} rows")
     logger.info(f"{ds}")
     
     # Validate the dataset format

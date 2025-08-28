@@ -12,7 +12,7 @@ SBATCH_TEMPLATE = """#!/bin/bash
 #SBATCH --partition={partition}
 #SBATCH --account={account}
 #SBATCH --qos={qos}
-#SBATCH --array=1-{array_size}%{num_inference_servers}
+##SBATCH --array=1-{num_inference_servers}
 #SBATCH --nodes={num_nodes_per_inference_server}
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task={cpus_per_node}
@@ -20,8 +20,8 @@ SBATCH_TEMPLATE = """#!/bin/bash
 #SBATCH --gres={gres_per_node}
 #SBATCH --time={time_limit}
 #SBATCH --signal=B:SIGUSR1@120
-#SBATCH --output={log_dir}/%A-%a-%N.log
-#SBATCH --error={log_dir}/%A-%a-%N.log
+#SBATCH --output={log_dir}/%a-%A-%N.log
+#SBATCH --error={log_dir}/%a-%A-%N.log
 {additional_sbatch_lines}
 
 # Print job information
@@ -40,7 +40,6 @@ echo "============================="
 CURRENT_SHARD=$((SLURM_ARRAY_TASK_ID - 1))
 COMPLETED_SHARDS_FILE="{log_dir}/shards_completed.log"
 FAILED_SHARDS_FILE="{log_dir}/shards_failed.log"
-
 
 
 set -e
@@ -205,7 +204,7 @@ log "INFO" "Dataset validation passed for shard ${{CURRENT_SHARD}}"
 
 # Start inference server
 log "INFO" "Starting inference server on ${{SLURM_JOB_NUM_NODES}} nodes"
-INFERENCE_SERVER_LOG="{log_dir}/${{SLURM_ARRAY_JOB_ID:-${{SLURM_JOB_ID}}}}-${{SLURM_ARRAY_TASK_ID}}-%N-inference-server.log"
+INFERENCE_SERVER_LOG="{log_dir}/${{SLURM_ARRAY_TASK_ID}}-${{SLURM_JOB_ID}}-%N-inference-server.log"
 INFERENCE_SERVER_COMMAND="{inference_server_command}"
 log "INFO" "Inference server command: ${{INFERENCE_SERVER_COMMAND}}"
 setsid srun --output="$INFERENCE_SERVER_LOG" --error="$INFERENCE_SERVER_LOG" \\
@@ -275,9 +274,9 @@ fi
 
 # Run inference
 log "INFO" "Running inference"
-INFERENCE_PROGRESS_LOG="{log_dir}/${{SLURM_ARRAY_JOB_ID:-${{SLURM_JOB_ID}}}}-${{SLURM_ARRAY_TASK_ID}}-${{HOSTNAME}}-inference-stats.jsonl"
+INFERENCE_PROGRESS_LOG="{progress_dir}/${{SLURM_ARRAY_TASK_ID}}-progress.jsonl"
 # Start inference in a new process group so we can kill the entire group
-setsid python run_inference.py --config {config_path} --num-shards {num_data_shards} --shard $((SLURM_ARRAY_TASK_ID - 1)) --log-file $INFERENCE_PROGRESS_LOG &
+setsid python run_inference.py --config {config_path} --num-shards {num_data_shards} --shard ${{CURRENT_SHARD}} --log-file $INFERENCE_PROGRESS_LOG &
 INFERENCE_PID=$!
 wait $INFERENCE_PID
 INFERENCE_EXIT_CODE=$?
@@ -329,7 +328,7 @@ def main():
         logger.error(f"Configuration validation error: {e}")
         return 1
 
-    # Ensure the output_path directory exists
+    # Ensure the output_path directory exists (where results will be written to)
     output_path = Path(config.output_path)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -341,19 +340,20 @@ def main():
             return 1
         else:
             logger.warning(f"Output directory '{output_dir}' already exists. Overwriting due to --force flag.")
-    else:
-        output_dir.mkdir(parents=True)
     
     # Ensure directory exists (in case --force was used but directory was removed)
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output directory: {output_dir}")
 
+    progress_dir = output_dir / "progress"
+    progress_dir.mkdir(exist_ok=True)
+
     # Use output directory as log directory
     config_dict["log_dir"] = str(output_dir)
+    config_dict["progress_dir"] = str(progress_dir)
 
-    # Set array size to total number of data shards
-    # The %num_inference_servers in SBATCH array directive limits concurrency
-    config_dict["array_size"] = config.num_data_shards
+    # num_inference_servers is the number of data shards
+    config_dict["num_data_shards"] = config.num_inference_servers
 
     # Generate additional SBATCH lines
     additional_sbatch_lines = ""
@@ -373,7 +373,7 @@ def main():
     config_dict["env_exports"] = env_exports
 
     # Copy config file to output directory for reproducibility
-    config_copy_path = output_dir / config_path.name
+    config_copy_path = output_dir / "ih_config.yaml"
     try:
         shutil.copy2(config_path, config_copy_path)
         logger.info(f"Config copied to: {config_copy_path}")
@@ -393,7 +393,7 @@ def main():
 
     sbatch_script = SBATCH_TEMPLATE.format(**config_dict)
     
-    job_script_path = output_dir / f"{config_dict['job_name']}.slurm"
+    job_script_path = output_dir / "ih_job.slurm"
     try:
         with open(job_script_path, "w") as f:
             f.write(sbatch_script)

@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any, Literal
 
 
@@ -82,9 +82,6 @@ class JobConfig(BaseConfig):
     )
     num_nodes_per_inference_server: int = Field(
         ..., gt=0, description="Number of nodes per inference server"
-    )
-    num_data_shards: Optional[int] = Field(
-        default=None, gt=0, description="Total number of data shards. If not specified, defaults to num_inference_servers. For very large datasets you can use more shards than inference servers for checkpointing. However, only num_inference_servers shards will be processed in parallel."
     )
     cpus_per_node: int = Field(..., gt=0, description="Number of CPUs per node")
     memory_per_node: str = Field(..., description="Memory per node in GB")
@@ -215,24 +212,6 @@ class JobConfig(BaseConfig):
                 raise ValueError(f"SBATCH argument '{key}' is reserved and cannot be overridden. Reserved args: {sorted(reserved_args)}")
         
         return v
-
-    @model_validator(mode="after")
-    def validate_and_set_num_data_shards(self):
-        """Validate and set num_data_shards with appropriate warnings."""
-        from loguru import logger
-        
-        # Set default if not specified
-        if self.num_data_shards is None:
-            self.num_data_shards = self.num_inference_servers
-            logger.info(f"num_data_shards not specified, defaulting to num_inference_servers ({self.num_inference_servers})")
-        
-        # Ensure num_data_shards is at least num_inference_servers
-        elif self.num_data_shards < self.num_inference_servers:
-            logger.warning(f"num_data_shards ({self.num_data_shards}) is smaller than num_inference_servers ({self.num_inference_servers}). "
-                          f"Setting num_data_shards to {self.num_inference_servers} to avoid idle inference servers.")
-            self.num_data_shards = self.num_inference_servers
-        
-        return self
 
 
 class InferenceConfig(BaseConfig):

@@ -96,7 +96,7 @@ class DatasetWriter:
         
         if emergency:
             logger.info("Creating checkpoint because of emergency.")
-            self.create_checkpoint()
+            self.create_checkpoint(emergency=True)
         elif final:
             logger.info("Finalizing.")
             logger.info("Creating checkpoint to finalize.")
@@ -138,7 +138,7 @@ class DatasetWriter:
         if size_limit_exceeded or row_limit_exceeded or final:
             logger.info(f"Creating part because size_limit={size_limit_exceeded} or row_limit={row_limit_exceeded} or final={final}.")
             self.create_part()
-        if not final:
+        if not final and not emergency:
             self.__init_tempfile()
     
     def create_part(self):
