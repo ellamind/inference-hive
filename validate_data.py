@@ -1,5 +1,7 @@
 import argparse
+import gc
 import sys
+import os
 from itertools import islice
 
 from loguru import logger
@@ -17,8 +19,7 @@ def validate_input_data_format(ds, input_column_name: str, id_column_name: str, 
         return
     
     # Sample a few rows to check format (up to 10 rows)
-    sample_size = min(10, len(ds))
-    sample_rows = list(islice(ds, sample_size))
+    sample_rows = list(islice(ds, 10))
     
     for i, row in enumerate(sample_rows):
         if input_column_name not in row:
@@ -137,6 +138,11 @@ def validate_dataset_from_config(config_path: str, shard: int | None = None, num
     )
     
     logger.info("✓ Data validation completed successfully!")
+    # Proactively free dataset/Arrow resources before exiting, to prevent segfaults
+    try:
+        del ds
+    except Exception:
+        pass
     return True
 
 
@@ -176,10 +182,11 @@ def main():
     try:
         validate_dataset_from_config(args.config, args.shard, args.num_shards)
         logger.info("Data validation passed! Dataset is ready for inference.")
-        sys.exit(0)
+        gc.collect()
+        os._exit(0)
     except Exception as e:
         logger.error(f"Data validation failed: {e}")
-        sys.exit(1)
+        os._exit(1)
 
 
 if __name__ == "__main__":
