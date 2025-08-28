@@ -25,7 +25,7 @@ def main():
 
     if jobs:
         for job in jobs:
-            job['shard'] = int(job["name"].split("-")[-1])
+            job['shard'] = int(job["name"].split("-")[-1])-1
         jobs.sort(key=lambda x: x["shard"])
 
         logger.info(f"Found {len(jobs)} existing jobs for {config.job_name}")
@@ -45,7 +45,7 @@ def main():
 
     for i, shard in enumerate(shards_to_submit):
         logger.info(f"  {i+1}/{len(shards_to_submit)}: Submitting job for shard {shard}...")
-        cmd = ["sbatch", "--array", f"{shard+1}", "--job-name", f"{config.job_name}-{shard:06d}", str(job_script)]
+        cmd = ["sbatch", "--array", f"{shard+1}", "--job-name", f"{config.job_name}-{shard+1:06d}", str(job_script)]
         try:
             result = subprocess.run(
                 cmd,

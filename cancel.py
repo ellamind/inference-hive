@@ -17,7 +17,7 @@ def main():
     shards = list(range(config.num_inference_servers))
 
     for shard in shards:
-        cmd = ["scancel", "--name",f"{config.job_name}-{shard:06d}"]
+        cmd = ["scancel", "--name",f"{config.job_name}-{shard+1:06d}"]
         try:
             _ = subprocess.run(
                 cmd,

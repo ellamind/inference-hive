@@ -38,8 +38,8 @@ echo "============================="
 
 # Check if this shard is already completed
 CURRENT_SHARD=$((SLURM_ARRAY_TASK_ID - 1))
-COMPLETED_SHARDS_FILE="{log_dir}/shards_completed.log"
-FAILED_SHARDS_FILE="{log_dir}/shards_failed.log"
+COMPLETED_SHARDS_FILE="{progress_dir}/shards_completed.log"
+FAILED_SHARDS_FILE="{progress_dir}/shards_failed.log"
 
 
 set -e
@@ -76,6 +76,7 @@ fi
 
 cleanup() {{
     local signal=$1
+    log "INFO" "Received signal $signal, initiating cleanup..."
     if [ "$signal" = "SIGUSR1" ]; then
         log "WARN" "Job is about to hit time limit, shutting down gracefully..."
     elif [ "$signal" = "SIGTERM" ]; then
@@ -95,11 +96,16 @@ cleanup() {{
     # give the inference script some time before shutting down the inference server
     sleep 10 
 
-    # Send SIGINT to inference server process group
+    # Send two SIGINTs to inference server srun process group (srun expects two to abort)
     if [ ! -z "$INFERENCE_SERVER_PID" ] && kill -0 $INFERENCE_SERVER_PID 2>/dev/null; then
-        log "INFO" "Sending SIGINT to inference server process group (PID: $INFERENCE_SERVER_PID)"
+        log "INFO" "Sending SIGINT x2 to inference server srun process group (PID: $INFERENCE_SERVER_PID)"
         # Send signal to the entire process group using negative PID
         kill -INT -$INFERENCE_SERVER_PID 2>/dev/null || kill -INT $INFERENCE_SERVER_PID
+        # Short delay to ensure the second INT is within 1s window expected by srun
+        sleep 0.1
+        if kill -0 $INFERENCE_SERVER_PID 2>/dev/null; then
+            kill -INT -$INFERENCE_SERVER_PID 2>/dev/null || kill -INT $INFERENCE_SERVER_PID
+        fi
     fi
 
     log "INFO" "Waiting for processes to finish gracefully..."
@@ -147,15 +153,16 @@ cleanup() {{
     
     # Only resubmit if this was a time limit signal, not a manual cancellation
     # Resubmit instead of requeue since requeue is disabled on many clusters.
+    sbatch_command=(sbatch --array="${{SLURM_ARRAY_TASK_ID}}" --job-name="{job_name}-$(printf '%06d' "${{SLURM_ARRAY_TASK_ID}}")" "{output_dir}/ih_job.slurm")
     if [ "$signal" = "SIGUSR1" ]; then
         log "INFO" "Resubmitting task ${{SLURM_ARRAY_TASK_ID}} automatically due to time limit..."
-        sbatch_output=$(sbatch --array=${{SLURM_ARRAY_TASK_ID}} "{log_dir}/{job_name}.slurm" 2>&1)
-        if [ $? -eq 0 ]; then
+        log "INFO" "Running command: ${{sbatch_command[*]}}"
+        if sbatch_output="$("${{sbatch_command[@]}}" 2>&1)"; then
             new_job_id=$(echo "$sbatch_output" | grep -o '[0-9]*')
-            log "INFO" "Task ${{SLURM_ARRAY_TASK_ID}} resubmitted successfully as job ${{new_job_id}}. Progress will resume from where it left off."
+            log "INFO" "Task ${{SLURM_ARRAY_TASK_ID}} resubmitted successfully as job ${{new_job_id}}. Progress will resume from checkpoint."
         else
             log "ERROR" "Failed to resubmit task ${{SLURM_ARRAY_TASK_ID}}. Error: $sbatch_output"
-            log "ERROR" "You may need to resubmit manually: sbatch --array=${{SLURM_ARRAY_TASK_ID}} {log_dir}/{job_name}.slurm"
+            log "ERROR" "You may need to resubmit manually: ${{sbatch_command[*]}}"
             # Mark as failed since resubmission failed
             log_failed_shard "resubmission_failed" "Failed to resubmit after time limit: $sbatch_output"
         fi
@@ -167,7 +174,7 @@ cleanup() {{
             log_failed_shard "unexpected_signal" "Job received signal: $signal"
         fi
         log "INFO" "Task ${{SLURM_ARRAY_TASK_ID}} was manually cancelled - not resubmitting automatically."
-        log "INFO" "To restart this task later, run: sbatch --array=${{SLURM_ARRAY_TASK_ID}} {log_dir}/{job_name}.slurm"
+        log "INFO" "To restart this task later, run: ${{sbatch_command[*]}}"
     fi
     
     exit 0
@@ -345,11 +352,16 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output directory: {output_dir}")
 
+
+
     progress_dir = output_dir / "progress"
     progress_dir.mkdir(exist_ok=True)
 
-    # Use output directory as log directory
-    config_dict["log_dir"] = str(output_dir)
+    log_dir = output_dir / "logs"
+    log_dir.mkdir(exist_ok=True)
+    
+    config_dict["output_dir"] = str(output_dir)
+    config_dict["log_dir"] = str(log_dir)
     config_dict["progress_dir"] = str(progress_dir)
 
     # num_inference_servers is the number of data shards

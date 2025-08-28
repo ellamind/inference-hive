@@ -26,7 +26,7 @@ def get_current_jobs(me: bool=True, job_name: str=None):
         raise RuntimeError("Unexpected squeue JSON structure: 'jobs' is not a list")
     if job_name:
         jobs = [job for job in jobs if job["name"][:-7] == job_name]
-    jobs = [job for job in jobs if job["job_state"] in {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING"}]
+    jobs = [job for job in jobs if any([state in {"PENDING", "RUNNING", "CONFIGURING", "COMPLETING"} for state in job["job_state"]])]
     return jobs
 
 
