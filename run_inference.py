@@ -195,11 +195,11 @@ def _load_and_validate_dataset(config, args: argparse.Namespace):
     return ds
 
 
-def _read_existing_ids(output_path: str) -> set:
+def _read_existing_ids(output_path: str, shard: int) -> set:
     """Read existing IDs from an existing output dataset directory."""
     existing_ids = set()
     try:
-        reader = DatasetReader(output_path, columns=['id'])
+        reader = DatasetReader(output_path, columns=['id'], glob_pattern=f"**/shard{shard:06d}*.parquet")
         logger.info(
             f"Found existing output in {output_path} with {len(reader):_} rows"
         )
@@ -215,7 +215,7 @@ def _read_existing_ids(output_path: str) -> set:
 async def run_inference_async(config, args: argparse.Namespace):
     """Run the asynchronous inference pipeline."""
     ds = _load_and_validate_dataset(config, args)
-    existing_ids = _read_existing_ids(config.output_path)
+    existing_ids = _read_existing_ids(config.output_path, args.shard)
 
     api_key = os.environ.get("API_KEY", "EMPTY")
     client = AsyncOpenAI(

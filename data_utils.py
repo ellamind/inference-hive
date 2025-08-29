@@ -28,6 +28,7 @@ class DatasetWriter:
         batch_size: int = 1_000,
         checkpoint_interval_seconds: int = 1800,
         check_time_every_n_rows: int = 100,
+        max_num_checkpoints: int = 5,
     ) -> None:
         self.schema = schema
         self.max_file_size_bytes = max_file_size_mb * 1024 * 1024  # Convert MB to bytes
@@ -35,6 +36,7 @@ class DatasetWriter:
         self.batch_size = batch_size
         self.checkpoint_interval_seconds = checkpoint_interval_seconds
         self.check_time_every_n_rows = check_time_every_n_rows
+        self.max_num_checkpoints = max_num_checkpoints
         self.shard_name = str(f"shard{shard:06d}")
         self.dataset_dir = dataset_dir.absolute()
         self.dataset_dir.mkdir(exist_ok=True)
@@ -48,6 +50,9 @@ class DatasetWriter:
         self._closed = False
         
         self.checkpoint_files = self._get_existing_checkpoints()
+        if len(self.checkpoint_files) > self.max_num_checkpoints:
+            logger.info(f"Merging checkpoints into a single checkpoint because there are too many checkpoints ({len(self.checkpoint_files)}).")
+            self._merge_checkpoints()
         
     def _should_checkpoint_by_time(self) -> bool:
         """Check if checkpoint interval has been reached using simple time comparison"""
@@ -139,6 +144,10 @@ class DatasetWriter:
             logger.info(f"Creating part because size_limit={size_limit_exceeded} or row_limit={row_limit_exceeded} or final={final}.")
             self.create_part()
         if not final and not emergency:
+            if len(self.checkpoint_files) > self.max_num_checkpoints:
+                logger.info(f"Merging checkpoints into a single checkpoint because there are too many checkpoints ({len(self.checkpoint_files)}).")
+                self._merge_checkpoints()
+
             self.__init_tempfile()
     
     def create_part(self):
@@ -175,6 +184,14 @@ class DatasetWriter:
             
             # Only delete input files after successful merge and rename
             for file in input_files:
+                # Do not delete the output file if it was also among the inputs
+                try:
+                    if str(file.resolve()) == str(output_file.resolve()):
+                        continue
+                except Exception:
+                    # Best effort compare; if resolution fails, compare as-is
+                    if str(file) == str(output_file):
+                        continue
                 file.unlink()
                 
         except Exception as e:
@@ -201,6 +218,21 @@ class DatasetWriter:
                 next_checkpoint_id += 1
             else:
                 return f
+    
+    def _merge_checkpoints(self):
+        if len(self.checkpoint_files) <= 1:
+            return
+        files_to_merge = [checkpoint.file_path for checkpoint in self.checkpoint_files]
+        output_file = files_to_merge[0]
+        logger.info(
+            f"Merging {len(files_to_merge)} checkpoints into single checkpoint: {output_file.name}"
+        )
+        try:
+            self._merge_parquet_files(files_to_merge, output_file)
+            self.checkpoint_files = self._get_existing_checkpoints()
+        except Exception as e:
+            logger.error(f"Failed to merge checkpoints into {output_file}: {e}")
+            raise
             
     def _get_existing_checkpoints(self):
         checkpoint_pattern = f"{self.shard_name}_checkpoint*.parquet"
