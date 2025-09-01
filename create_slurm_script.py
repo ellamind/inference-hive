@@ -290,7 +290,7 @@ INFERENCE_EXIT_CODE=$?
 
 if [ $INFERENCE_EXIT_CODE -eq 0 ]; then
     log "INFO" "Inference completed successfully, recording shard completion"
-    echo "$((SLURM_ARRAY_TASK_ID - 1))" >> "{log_dir}/completed_shards.log"
+    echo "$((SLURM_ARRAY_TASK_ID - 1))" >> "$COMPLETED_SHARDS_FILE"
     log "INFO" "Done"
 else
     log "ERROR" "Inference failed with exit code $INFERENCE_EXIT_CODE"

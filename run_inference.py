@@ -252,6 +252,7 @@ async def run_inference_async(config, args: argparse.Namespace):
         last_report_processed_rows = 0
 
         api_failure_counter = APIFailureCounter(config.max_consecutive_failures)
+        fatal_error_event = asyncio.Event()
 
         async def request(prompt_or_messages, row_id):
             nonlocal processed_rows, skipped_rows, first_completion_time
@@ -308,7 +309,13 @@ async def run_inference_async(config, args: argparse.Namespace):
                     )
 
                     if is_api_error:
-                        api_failure_counter.record_failure()
+                        try:
+                            api_failure_counter.record_failure()
+                        except RuntimeError as fatal:
+                            # Signal fatal outage so the run can abort with non-zero exit
+                            fatal_error_event.set()
+                            logger.error(str(fatal))
+                            raise
                         logger.warning(f"API connection issue: {e}")
                         raise
                     else:
@@ -415,6 +422,9 @@ async def run_inference_async(config, args: argparse.Namespace):
             async def progress_reporter():
                 while True:
                     await asyncio.sleep(args.progress_report_interval)
+                    if fatal_error_event.is_set():
+                        logger.info("Fatal error detected, stopping progress reporter")
+                        break
                     await report_progress()
                     async with progress_lock:
                         total_completed = processed_rows + skipped_rows
@@ -442,7 +452,7 @@ async def run_inference_async(config, args: argparse.Namespace):
 
             queue = asyncio.Queue(maxsize=config.max_connections * 10)
             workers = [asyncio.create_task(worker()) for _ in range(config.max_connections)]
-            asyncio.create_task(progress_reporter())
+            reporter_task = asyncio.create_task(progress_reporter())
 
             async def producer():
                 for row in ds:
@@ -454,8 +464,29 @@ async def run_inference_async(config, args: argparse.Namespace):
             start_time = time.time()
 
             producer_task = asyncio.create_task(producer())
-            await producer_task
-            await queue.join()
+
+            # Wait for either queue to drain or a fatal error to occur
+            join_task = asyncio.create_task(queue.join())
+            fatal_task = asyncio.create_task(fatal_error_event.wait())
+
+            done, pending = await asyncio.wait({join_task, fatal_task}, return_when=asyncio.FIRST_COMPLETED)
+
+            # Ensure reporter stops
+            if not reporter_task.done():
+                reporter_task.cancel()
+
+            # Cancel producer if still running in fatal case
+            if fatal_task in done:
+                if not producer_task.done():
+                    producer_task.cancel()
+                # Cancel workers promptly
+                for w in workers:
+                    if not w.done():
+                        w.cancel()
+                # Abort the run with a non-zero exit so SLURM marks shard as failed
+                raise RuntimeError("API appears to be down: aborting shard to preserve data")
+
+            # Queue drained normally
             await report_progress(is_final=True)
 
             total_time = time.time() - start_time
