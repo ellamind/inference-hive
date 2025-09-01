@@ -87,7 +87,7 @@ class ProgressLogger:
         self.interval_tokens = 0
     
     def __enter__(self):
-        self.file_handle = open(self.log_file_path, 'w')
+        self.file_handle = open(self.log_file_path, 'a')
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
