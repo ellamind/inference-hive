@@ -334,7 +334,7 @@ def main():
     logger.info(f"Shards running: {shards_running}")
     logger.info(f"Shards in queue: {shards_not_running}")
 
-    shards_completed_file = Path(args.run_dir / "shards_completed.log")
+    shards_completed_file = Path(args.run_dir / "progress" / "shards_completed.log")
 
     if shards_completed_file.exists():
         shards_completed = [int(line.strip()) for line in shards_completed_file.read_text().splitlines()]
