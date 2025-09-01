@@ -89,5 +89,5 @@ completions_kwargs:
 
 
 # === Connection Settings ===
-max_connections: 100
+max_connections: 50 # Use less connections for large models. Can use 100+ for smaller models.
 max_retries: 3
