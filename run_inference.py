@@ -4,6 +4,7 @@ import json
 import os
 import signal
 import time
+from pathlib import Path
 
 from loguru import logger
 from openai import AsyncOpenAI
@@ -71,7 +72,7 @@ class ProgressLogger:
     """Logger for structured progress data in JSONL format"""
     
     def __init__(self, log_file_path: str, shard: int, num_shards: int):
-        self.log_file_path = log_file_path
+        self.log_file_path = Path(log_file_path)
         self.shard = shard
         self.num_shards = num_shards
         self.file_handle = None
@@ -87,7 +88,35 @@ class ProgressLogger:
         self.interval_tokens = 0
     
     def __enter__(self):
-        self.file_handle = open(self.log_file_path, 'a')
+        # Sanitize existing JSONL file by removing invalid lines (e.g., from previous crashes)
+        try:
+            if self.log_file_path.exists() and self.log_file_path.stat().st_size > 0:
+                temp_path = self.log_file_path.with_suffix(self.log_file_path.suffix + ".sanitized")
+                total_lines = 0
+                kept_lines = 0
+                with self.log_file_path.open('r') as src, temp_path.open('w') as dst:
+                    for line in src:
+                        total_lines += 1
+                        stripped = line.strip()
+                        if not stripped:
+                            continue
+                        try:
+                            json.loads(stripped)
+                        except Exception:
+                            # Drop invalid JSON lines
+                            continue
+                        dst.write(stripped)
+                        dst.write('\n')
+                        kept_lines += 1
+                # Atomically replace the original file with the sanitized version
+                temp_path.replace(self.log_file_path)
+                if kept_lines != total_lines:
+                    logger.warning(
+                        f"Sanitized JSONL log file {self.log_file_path}: kept {kept_lines}/{total_lines} valid lines"
+                    )
+        except Exception as e:
+            logger.error(f"Failed to sanitize log file {self.log_file_path}: {e}")
+        self.file_handle = self.log_file_path.open('a')
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
