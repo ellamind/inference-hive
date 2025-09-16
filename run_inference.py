@@ -4,10 +4,10 @@ import json
 import os
 import signal
 import time
-from pathlib import Path
 
 from loguru import logger
 from openai import AsyncOpenAI
+import udf
 
 from data_utils import DatasetReader, DatasetWriter, NoDatasetFilesError, load_data
 from schemas import CHAT_COMPLETION_SCHEMA, COMPLETION_SCHEMA
@@ -72,7 +72,7 @@ class ProgressLogger:
     """Logger for structured progress data in JSONL format"""
     
     def __init__(self, log_file_path: str, shard: int, num_shards: int):
-        self.log_file_path = Path(log_file_path)
+        self.log_file_path = log_file_path
         self.shard = shard
         self.num_shards = num_shards
         self.file_handle = None
@@ -88,35 +88,7 @@ class ProgressLogger:
         self.interval_tokens = 0
     
     def __enter__(self):
-        # Sanitize existing JSONL file by removing invalid lines (e.g., from previous crashes)
-        try:
-            if self.log_file_path.exists() and self.log_file_path.stat().st_size > 0:
-                temp_path = self.log_file_path.with_suffix(self.log_file_path.suffix + ".sanitized")
-                total_lines = 0
-                kept_lines = 0
-                with self.log_file_path.open('r') as src, temp_path.open('w') as dst:
-                    for line in src:
-                        total_lines += 1
-                        stripped = line.strip()
-                        if not stripped:
-                            continue
-                        try:
-                            json.loads(stripped)
-                        except Exception:
-                            # Drop invalid JSON lines
-                            continue
-                        dst.write(stripped)
-                        dst.write('\n')
-                        kept_lines += 1
-                # Atomically replace the original file with the sanitized version
-                temp_path.replace(self.log_file_path)
-                if kept_lines != total_lines:
-                    logger.warning(
-                        f"Sanitized JSONL log file {self.log_file_path}: kept {kept_lines}/{total_lines} valid lines"
-                    )
-        except Exception as e:
-            logger.error(f"Failed to sanitize log file {self.log_file_path}: {e}")
-        self.file_handle = self.log_file_path.open('a')
+        self.file_handle = open(self.log_file_path, 'w')
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -214,8 +186,27 @@ def _load_and_validate_dataset(config, args: argparse.Namespace):
     """Load dataset and validate format, returning dataset and total length."""
     ds = load_data(config, args.shard, args.num_shards)
     logger.info(f"Dataset:\n{ds}")
+
+    # Build a small concrete sample (no generator) for validation
+    sample_rows = []
+    try:
+        udf_func = getattr(udf, config.apply_udf) if config.apply_udf else None
+    except AttributeError:
+        logger.error(f"UDF function '{config.apply_udf}' not found in udf.py")
+        raise
+    for row in ds:
+        if udf_func is not None:
+            try:
+                row = udf_func(row, **(config.apply_udf_kwargs or {}))
+            except Exception as e:
+                logger.error(f"UDF error during validation: {e}")
+                raise
+        sample_rows.append(row)
+        if len(sample_rows) >= 1000:
+            break
+
     validate_input_data_format(
-        ds,
+        sample_rows,
         config.input_column_name,
         config.id_column_name,
         config.api_type,
@@ -243,7 +234,7 @@ def _read_existing_ids(output_path: str, shard: int) -> set:
 
 async def run_inference_async(config, args: argparse.Namespace):
     """Run the asynchronous inference pipeline."""
-    ds = _load_and_validate_dataset(config, args)
+    _load_and_validate_dataset(config, args)
     existing_ids = _read_existing_ids(config.output_path, args.shard)
 
     api_key = os.environ.get("API_KEY", "EMPTY")
@@ -269,8 +260,11 @@ async def run_inference_async(config, args: argparse.Namespace):
     try:
         semaphore = asyncio.Semaphore(config.max_connections)
 
+        # Build raw dataset for processing (apply UDF per-row in workers)
+        raw_ds = DatasetReader(config.dataset_path, shard=args.shard, num_shards=args.num_shards, **(config.dataset_kwargs or {}))
+
         # Progress tracking
-        total_rows = len(ds)
+        total_rows = len(raw_ds)
         processed_rows = 0
         skipped_rows = 0
         progress_lock = asyncio.Lock()
@@ -283,23 +277,37 @@ async def run_inference_async(config, args: argparse.Namespace):
         api_failure_counter = APIFailureCounter(config.max_consecutive_failures)
         fatal_error_event = asyncio.Event()
 
-        async def request(prompt_or_messages, row_id):
+        # Resolve UDF function once
+        udf_func = None
+        if config.apply_udf:
+            try:
+                udf_func = getattr(udf, config.apply_udf)
+            except AttributeError:
+                logger.error(f"UDF function '{config.apply_udf}' not found in udf.py")
+                raise
+
+        async def request(row):
             nonlocal processed_rows, skipped_rows, first_completion_time
 
             async with semaphore:
+                row_id = row[config.id_column_name]
                 if row_id in existing_ids:
                     async with progress_lock:
                         skipped_rows += 1
                     return
 
                 try:
+                    # Apply UDF per-row (guarding against bad text/formatting)
+                    if udf_func is not None:
+                        row = udf_func(row, **(config.apply_udf_kwargs or {}))
+
                     if config.api_type == "chat-completion":
                         response = await client.chat.completions.create(
-                            model=config.model, messages=prompt_or_messages, **config.completions_kwargs
+                            model=config.model, messages=row[config.input_column_name], **config.completions_kwargs
                         )
                     elif config.api_type == "completion":
                         response = await client.completions.create(
-                            model=config.model, prompt=prompt_or_messages, **config.completions_kwargs
+                            model=config.model, prompt=row[config.input_column_name], **config.completions_kwargs
                         )
                     else:
                         raise ValueError(f"Invalid API type: {config.api_type}")
@@ -448,75 +456,77 @@ async def run_inference_async(config, args: argparse.Namespace):
                             flush=True
                         )
 
-            async def progress_reporter():
+            async def progress_reporter(scheduling_done_event: asyncio.Event, inflight_tasks: set):
                 while True:
                     await asyncio.sleep(args.progress_report_interval)
                     if fatal_error_event.is_set():
                         logger.info("Fatal error detected, stopping progress reporter")
                         break
                     await report_progress()
-                    async with progress_lock:
-                        total_completed = processed_rows + skipped_rows
-                        if total_rows is not None and total_completed >= total_rows:
-                            logger.info("All rows processed, exiting")
-                            break
-
-            async def worker():
-                while True:
-                    try:
-                        row = await queue.get()
-                        if row == "DONE":
-                            queue.task_done()
-                            break
-
-                        await request(row[config.input_column_name], row[config.id_column_name])
-                        queue.task_done()
-
-                    except asyncio.CancelledError:
-                        logger.info("Worker task cancelled, exiting gracefully")
+                    if scheduling_done_event.is_set() and not inflight_tasks:
+                        logger.info("All rows processed, exiting")
                         break
-                    except Exception as e:
-                        logger.error(f"Error processing row: {e}")
-                        queue.task_done()
-
-            queue = asyncio.Queue(maxsize=config.max_connections * 10)
-            workers = [asyncio.create_task(worker()) for _ in range(config.max_connections)]
-            reporter_task = asyncio.create_task(progress_reporter())
-
-            async def producer():
-                for row in ds:
-                    await queue.put(row)
-                for _ in workers:
-                    await queue.put("DONE")
 
             logger.info("Starting inference")
             start_time = time.time()
 
-            producer_task = asyncio.create_task(producer())
+            # Iterator and bounded inflight scheduling
+            ds_iter = iter(raw_ds)
+            inflight: set[asyncio.Task] = set()
+            scheduling_done = asyncio.Event()
 
-            # Wait for either queue to drain or a fatal error to occur
-            join_task = asyncio.create_task(queue.join())
-            fatal_task = asyncio.create_task(fatal_error_event.wait())
+            async def start_next() -> bool:
+                if fatal_error_event.is_set():
+                    return False
+                try:
+                    row = next(ds_iter)
+                except StopIteration:
+                    scheduling_done.set()
+                    return False
+                task = asyncio.create_task(request(row))
+                inflight.add(task)
+                def _discard(t: asyncio.Task):
+                    inflight.discard(t)
+                task.add_done_callback(_discard)
+                return True
 
-            done, pending = await asyncio.wait({join_task, fatal_task}, return_when=asyncio.FIRST_COMPLETED)
+            # Prime up to max_connections
+            for _ in range(config.max_connections):
+                created = await start_next()
+                if not created:
+                    break
 
-            # Ensure reporter stops
-            if not reporter_task.done():
-                reporter_task.cancel()
+            reporter_task = asyncio.create_task(progress_reporter(scheduling_done, inflight))
 
-            # Cancel producer if still running in fatal case
-            if fatal_task in done:
-                if not producer_task.done():
-                    producer_task.cancel()
-                # Cancel workers promptly
-                for w in workers:
-                    if not w.done():
-                        w.cancel()
-                # Abort the run with a non-zero exit so SLURM marks shard as failed
+            # Drive pipeline
+            while inflight and not fatal_error_event.is_set():
+                done, _ = await asyncio.wait(inflight, return_when=asyncio.FIRST_COMPLETED)
+                # For each completed task, try to start one new task
+                for t in done:
+                    exc = t.exception()
+                    if exc is not None and fatal_error_event.is_set():
+                        break
+                    await start_next()
+
+            # Handle fatal outage: cancel remaining tasks
+            if fatal_error_event.is_set():
+                for t in list(inflight):
+                    if not t.done():
+                        t.cancel()
+                if inflight:
+                    await asyncio.gather(*inflight, return_exceptions=True)
+                if not reporter_task.done():
+                    reporter_task.cancel()
                 raise RuntimeError("API appears to be down: aborting shard to preserve data")
 
-            # Queue drained normally
-            await report_progress(is_final=True)
+            # Await remaining tasks
+            if inflight:
+                await asyncio.gather(*inflight, return_exceptions=True)
+
+            # Final report and stop reporter
+            if not reporter_task.done():
+                await report_progress(is_final=True)
+                reporter_task.cancel()
 
             total_time = time.time() - start_time
             if first_completion_time is not None:
@@ -530,15 +540,27 @@ async def run_inference_async(config, args: argparse.Namespace):
                     f"Done. {processed_rows:_} processed, {skipped_rows:_} skipped, Total time: {format_time(total_time)}"
                 )
 
+            # Return progress counters for completion verification
+            return processed_rows, skipped_rows, total_rows
+
         if progress_logger:
             with progress_logger:
-                await run_inference()
+                processed_rows, skipped_rows, total_rows = await run_inference()
         else:
-            await run_inference()
+            processed_rows, skipped_rows, total_rows = await run_inference()
+
 
         logger.info("Closing writer...")
         writer.close()
         logger.info("Writer closed successfully")
+        
+        # If we exit without processing the full shard, treat as failure so the
+        # job wrapper won't mark the shard as completed.
+        if (processed_rows + skipped_rows) < total_rows:
+            raise RuntimeError(
+                f"Shard incomplete: completed {processed_rows + skipped_rows:_}/{total_rows:_} rows"
+            )
+
 
     except Exception as e:
         logger.error(f"An error occurred during inference: {e}")

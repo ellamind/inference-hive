@@ -10,16 +10,14 @@ from pydantic import TypeAdapter, ValidationError
 
 from config import load_config_for_validation
 from data_utils import load_data
+import udf
 
 
-def validate_input_data_format(ds, input_column_name: str, id_column_name: str, api_type: str, log_samples: bool = True):
+def validate_input_data_format(sample_rows, input_column_name: str, id_column_name: str, api_type: str, log_samples: bool = True):
     """Validate that the input data format matches the expected API type format"""
-    if len(ds) == 0:
+    if len(sample_rows) == 0:
         logger.warning("Empty dataset, skipping format validation")
         return
-    
-    # Sample a few rows to check format (up to 10 rows)
-    sample_rows = list(islice(ds, 10))
     
     for i, row in enumerate(sample_rows):
         if input_column_name not in row:
@@ -128,13 +126,25 @@ def validate_dataset_from_config(config_path: str, shard: int | None = None, num
     logger.info(f"Dataset {shard=} loaded: {len(ds)} rows")
     logger.info(f"{ds}")
     
-    # Validate the dataset format
+    # Validate the dataset format using a small sample (apply UDF if configured)
     logger.info("Starting data validation...")
+    sample_size = 10
+    raw_sample_rows = list(islice(ds, sample_size))
+
+    if config.apply_udf:
+        try:
+            udf_func = getattr(udf, config.apply_udf)
+        except AttributeError:
+            raise ValueError(f"UDF function '{config.apply_udf}' not found in udf.py")
+        sample_rows = [udf_func(row, **(config.apply_udf_kwargs or {})) for row in raw_sample_rows]
+    else:
+        sample_rows = raw_sample_rows
+
     validate_input_data_format(
-        ds, 
-        config.input_column_name, 
-        config.id_column_name, 
-        config.api_type
+        sample_rows,
+        config.input_column_name,
+        config.id_column_name,
+        config.api_type,
     )
     
     logger.info("✓ Data validation completed successfully!")

@@ -322,51 +322,6 @@ class DatasetReader:
     def get_schema(self) -> pa.Schema:
         return self.ds.schema
 
-class DatasetWrapper:
-    
-    def __init__(self, dataset, udf_func, udf_kwargs=None):
-        self._wrapped_dataset = dataset
-        self._udf_func = udf_func
-        self._udf_kwargs = udf_kwargs or {}
-    
-    def __getattr__(self, name):
-        return getattr(self._wrapped_dataset, name)
-    
-    def __iter__(self):
-        """
-        Override __iter__ to apply the UDF function to each row.
-        """
-        for row in self._wrapped_dataset:
-            try:
-                transformed_row = self._udf_func(row, **self._udf_kwargs)
-                yield transformed_row
-            except Exception as e:
-                logger.error(f"Error applying UDF to row: {e}")
-                raise
-    
-    def __len__(self):
-        return len(self._wrapped_dataset)
-    
-    def __str__(self):
-        return f"DatasetWrapper({self._wrapped_dataset})"
-    
-
-def wrap_with_udf(ds, config):
-    try:
-        import udf
-        udf_func = getattr(udf, config.apply_udf)
-    except ImportError:
-        logger.error("Could not import udf module. Make sure udf.py exists in the project root.")
-        raise
-    except AttributeError:
-        logger.error(f"UDF function '{config.apply_udf}' not found in udf.py")
-        raise
-    
-    udf_kwargs = config.apply_udf_kwargs or {}
-    
-    logger.info(f"Wrapping dataset with UDF: {config.apply_udf}, kwargs: {udf_kwargs}")
-    
-    return DatasetWrapper(ds, udf_func, udf_kwargs)
 
 def load_data(config, shard: int = None, num_shards: int = None):
     logger.info(
@@ -381,7 +336,7 @@ def load_data(config, shard: int = None, num_shards: int = None):
             logger.info("Loading dataset with load_dataset")
             ds = hfds.load_dataset(str(config.dataset_path), **kwargs)
 
-        # Check if dataset is a DatasetDict and raise error if it is
+        # check if dataset is a DatasetDict and raise error if it is
         if isinstance(ds, (hfds.DatasetDict, hfds.IterableDatasetDict)):
             available_splits = list(ds.keys())
             raise ValueError(
@@ -389,7 +344,7 @@ def load_data(config, shard: int = None, num_shards: int = None):
                 "Please specify a split in your dataset_kwargs (e.g., 'split': 'train') "
             )
         
-        # Check if dataset is an IterableDataset and raise error, as IterableDataset does not support sharding
+        # check if dataset is an IterableDataset and raise error, as IterableDataset does not support sharding
         if isinstance(ds, hfds.IterableDataset):
             raise ValueError(
                 "IterableDataset is currently not supported. Use a regular Dataset instead (streaming=False)."
@@ -402,6 +357,5 @@ def load_data(config, shard: int = None, num_shards: int = None):
         ds = DatasetReader(config.dataset_path, shard=shard, num_shards=num_shards, **kwargs)
     else:
         raise ValueError(f"Invalid dataset type: {config.dataset_type}. Supported types are: 'hf', 'hf-disk', 'parquet'")
-    if config.apply_udf:
-        ds = wrap_with_udf(ds, config)
+    # UDFs are now applied per-row at inference time; do not wrap dataset here
     return ds
