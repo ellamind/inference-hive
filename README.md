@@ -52,11 +52,13 @@ On some clusters we have pre-installed environments which you can re-use if you 
 
 
 ### Installing Enviroments
-To install an environment, you can run
+To install an environments, you can run
 ```bash
+# to install the cuda-vllm environment
 pixi install -e cuda-vllm
+# to install all environments run:
+pixi install --all
 ```
-This will install the `cuda-vllm` environment.
 
 ### Using an Environment
 To use a pre-installed environment for your inference-hive runs, set `pixi_manifest` to the path of the corresponding `pixi.toml` file in your config.
@@ -72,6 +74,9 @@ This will launch a shell in the `cuda-vllm` environment.
 
 
 ## Usage
+
+### 0. Prerequisites
+All commands below assume that you are in the `inference-hive` root directory and that your shell has the default env activated. You can activate it by running `pixi shell`, or `pixi shell --manifest-path /path/to/existing/pixi.toml` to use a pre-installed env.
 
 ### 1. Dataset Preparation
 This toolkit ingests data through huggingface datasets or parquet files. The dataset must contain:
