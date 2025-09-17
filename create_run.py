@@ -4,7 +4,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from config import load_job_config
+from inference_hive.config import load_job_config
 
 
 SBATCH_TEMPLATE = """#!/bin/bash

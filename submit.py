@@ -5,8 +5,8 @@ import subprocess
 
 from loguru import logger
 
-from config import load_job_config
-from slurm_utils import get_current_jobs, get_job_state_counts
+from inference_hive.config import load_job_config
+from inference_hive.slurm_utils import get_current_jobs, get_job_state_counts
 
 def main():
     parser = argparse.ArgumentParser()

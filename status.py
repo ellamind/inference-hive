@@ -6,8 +6,8 @@ from loguru import logger
 from tabulate import tabulate
 import polars as pl
 
-from config import load_job_config
-from slurm_utils import get_current_jobs, get_job_state_counts
+from inference_hive.config import load_job_config
+from inference_hive.slurm_utils import get_current_jobs, get_job_state_counts
 
 
 def read_progress_file(file_path: str) -> pl.DataFrame:

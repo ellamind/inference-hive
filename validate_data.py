@@ -8,9 +8,9 @@ from loguru import logger
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import TypeAdapter, ValidationError
 
-from config import load_config_for_validation
-from data_utils import load_data
-import udf
+from inference_hive.config import load_config_for_validation
+from inference_hive.data_utils import load_data
+from inference_hive import udf
 
 
 def validate_input_data_format(sample_rows, input_column_name: str, id_column_name: str, api_type: str, log_samples: bool = True):

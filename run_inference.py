@@ -7,12 +7,12 @@ import time
 
 from loguru import logger
 from openai import AsyncOpenAI
-import udf
+from inference_hive import udf
 
-from data_utils import DatasetReader, DatasetWriter, NoDatasetFilesError, load_data
-from schemas import CHAT_COMPLETION_SCHEMA, COMPLETION_SCHEMA
+from inference_hive.data_utils import DatasetReader, DatasetWriter, NoDatasetFilesError, load_data
+from inference_hive.schemas import CHAT_COMPLETION_SCHEMA, COMPLETION_SCHEMA
 from validate_data import validate_input_data_format
-from config import load_inference_config
+from inference_hive.config import load_inference_config
 
 def _setup_signal_handlers(writer=None):
     """Setup signal handlers to gracefully close writer and exit cleanly"""
