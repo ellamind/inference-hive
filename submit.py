@@ -49,15 +49,16 @@ def main():
 
     logger.info(f"Jobs to submit: {len(shards_to_submit)}")
 
-    if args.limit:
-        logger.warning(f"Applying limit of {args.limit}.")
-        shards_to_submit = shards_to_submit[:args.limit]
-
     if shards_to_submit:
         logger.info(f"Submitting {len(shards_to_submit)} jobs...")
     else:
         logger.info("No jobs to submit.")
         return
+    
+    if args.limit:
+        logger.warning(f"Applying limit of {args.limit}.")
+        shards_to_submit = shards_to_submit[:args.limit]
+
 
     for i, shard in enumerate(shards_to_submit):
         logger.info(f"  {i+1}/{len(shards_to_submit)}: Submitting job for shard {shard}...")

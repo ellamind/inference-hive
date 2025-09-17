@@ -36,7 +36,7 @@ After examining the extract:
 
 # create a column of conversations for chat-completion
 def create_conversation(example):
-    truncated_text = example["text"][:20000] # truncate documents to 20000 characters
+    truncated_text = example["text"][:30000] # truncate to 30000 characters
     return {
         "conversation": [{"role": "user", "content": prompt.format(document=truncated_text)}]
     }
@@ -44,6 +44,9 @@ ds = ds.map(create_conversation, keep_in_memory=True, desc="Creating conversatio
 
 # save the dataset
 ds.save_to_disk("fineweb2-deu_Latn-1M-chat-completion")
+
+
+
 
 
 

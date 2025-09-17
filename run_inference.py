@@ -260,11 +260,10 @@ async def run_inference_async(config, args: argparse.Namespace):
     try:
         semaphore = asyncio.Semaphore(config.max_connections)
 
-        # Build raw dataset for processing (apply UDF per-row in workers)
-        raw_ds = DatasetReader(config.dataset_path, shard=args.shard, num_shards=args.num_shards, **(config.dataset_kwargs or {}))
+        ds = load_data(config, args.shard, args.num_shards)
 
         # Progress tracking
-        total_rows = len(raw_ds)
+        total_rows = len(ds)
         processed_rows = 0
         skipped_rows = 0
         progress_lock = asyncio.Lock()
@@ -471,7 +470,7 @@ async def run_inference_async(config, args: argparse.Namespace):
             start_time = time.time()
 
             # Iterator and bounded inflight scheduling
-            ds_iter = iter(raw_ds)
+            ds_iter = iter(ds)
             inflight: set[asyncio.Task] = set()
             scheduling_done = asyncio.Event()
 

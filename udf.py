@@ -10,5 +10,6 @@ def do_nothing(row: Dict[str, Any]) -> Dict[str, Any]:
 
 # Example UDF for formatting a prompt using the 'text' column of the dataset.
 def format_prompt(row: Dict[str, Any]) -> Dict[str, Any]:
-    row['prompt'] = f"Summarize the following document:\n{row['text']}"
+    user_prompt = f"Summarize the following document:\n{row['text']}"
+    row['messages'] = [{"role": "user", "content": user_prompt.format(text=row["text"])}]
     return row

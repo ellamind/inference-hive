@@ -414,10 +414,7 @@ def main():
         logger.error(f"Error writing job script '{job_script_path}': {e}")
         return 1
 
-    logger.info(f"To submit the job: sbatch {job_script_path}")
-    logger.info(f"To cancel all jobs: scancel --name={config_dict['job_name']}")
-    logger.info(f"To check job status: squeue -u $USER --name={config_dict['job_name']}")
-    
+    logger.info(f"Run created at: {output_dir}")
     return 0
 
 

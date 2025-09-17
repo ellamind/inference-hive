@@ -99,13 +99,19 @@ def calculate_current_total_throughput(df: pl.DataFrame, cutoff_timestamp: float
     }
 
 
-def calculate_per_shard_stats(df: pl.DataFrame, cutoff_timestamp: float) -> pl.DataFrame:
+def calculate_per_shard_stats(df: pl.DataFrame, cutoff_timestamp: float, target_shards: list[int] = None) -> pl.DataFrame:
     """Calculate statistics for each shard using a precomputed cutoff timestamp"""
     if len(df) == 0:
         return pl.DataFrame()
     
-    # Get total number of shards from the data
-    num_shards = df.select(pl.col("num_shards").first()).item()
+    # Determine which shards to include in the report
+    if target_shards is not None:
+        # Use only the specified target shards
+        shards_to_show = target_shards
+    else:
+        # Use all shards from configuration
+        num_shards = df.select(pl.col("num_shards").first()).item()
+        shards_to_show = list(range(num_shards))
     
     # Get the latest record for each shard that has data
     latest_per_shard = df.group_by("shard").agg([
@@ -130,8 +136,8 @@ def calculate_per_shard_stats(df: pl.DataFrame, cutoff_timestamp: float) -> pl.D
         .alias("status")
     ])
     
-    # Create a complete list of all shards (0 to num_shards-1)
-    all_shards = pl.DataFrame({"shard": list(range(num_shards))})
+    # Create a complete list of target shards
+    all_shards = pl.DataFrame({"shard": shards_to_show})
     
     # Left join to include all shards, even those without data
     complete_stats = all_shards.join(latest_per_shard, on="shard", how="left").with_columns([
@@ -226,7 +232,7 @@ def print_current_total_throughput(totals: dict, recent_minutes: float):
     print(tabulate(table_data, headers=["Metric", "Rate"], tablefmt="grid"))
 
 
-def print_summary_info(df: pl.DataFrame, num_files: int, shards_completed=None, cutoff_timestamp: float = None):
+def print_summary_info(df: pl.DataFrame, num_files: int, shards_completed=None, cutoff_timestamp: float = None, target_shards: list[int] = None):
     """Print additional summary information, including completed shard count. Uses a precomputed cutoff timestamp for activity."""
     if len(df) == 0:
         return
@@ -237,8 +243,12 @@ def print_summary_info(df: pl.DataFrame, num_files: int, shards_completed=None, 
     duration_minutes = (last_timestamp - first_timestamp) / 60
     
     # Get total configured shards vs active shards
-    total_shards = df.select(pl.col("num_shards").first()).item()
-    shards_with_data = df.select(pl.col("shard").n_unique()).item()
+    if target_shards is not None:
+        total_shards = len(target_shards)
+        shards_with_data = df.select(pl.col("shard").n_unique()).item()
+    else:
+        total_shards = df.select(pl.col("num_shards").first()).item()
+        shards_with_data = df.select(pl.col("shard").n_unique()).item()
     
     # Calculate active shards (recent activity)
     if cutoff_timestamp is None:
@@ -301,6 +311,7 @@ def main():
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--recent-minutes", type=float, default=5.0)
     parser.add_argument("--detailed", action="store_true", default=False)
+    parser.add_argument("--shards", type=int, nargs="*", help="Optional list of specific shard numbers to monitor . If not provided, all shards are monitored.")
     args = parser.parse_args()
 
     # args=argparse.Namespace()
@@ -309,7 +320,18 @@ def main():
 
     config = load_job_config(args.run_dir / "ih_config.yaml")
 
-    shards = list(range(config.num_inference_servers))
+    # Determine which shards to monitor
+    if args.shards is not None:
+        # Validate that requested shards are within valid range
+        max_shard = config.num_inference_servers - 1
+        invalid_shards = [s for s in args.shards if s < 0 or s > max_shard]
+        if invalid_shards:
+            logger.error(f"Invalid shard numbers: {invalid_shards}. Valid range is 0-{max_shard}")
+            return
+        shards = sorted(args.shards)
+        logger.info(f"Monitoring specific shards: {shards}")
+    else:
+        shards = list(range(config.num_inference_servers))
 
     try:
         jobs = get_current_jobs(job_name=config.job_name)
@@ -328,12 +350,6 @@ def main():
     else:
         logger.info(f"No existing jobs found for {config.job_name}")
     
-    shards_running = [job["shard"] for job in jobs if "RUNNING" in job["job_state"]]
-    shards_not_running = [job["shard"] for job in jobs if "RUNNING" not in job["job_state"]]
-    
-    logger.info(f"Shards running: {shards_running}")
-    logger.info(f"Shards in queue: {shards_not_running}")
-
     shards_completed_file = Path(args.run_dir / "progress" / "shards_completed.log")
 
     if shards_completed_file.exists():
@@ -377,13 +393,13 @@ def main():
         df = load_and_combine_files(progress_files)
         logger.info(f"Total data points: {len(df):_}")
 
-        shard_stats = calculate_per_shard_stats(df, cutoff_timestamp)
+        shard_stats = calculate_per_shard_stats(df, cutoff_timestamp, shards if args.shards is not None else None)
         print_per_shard_stats(shard_stats, shards_completed)
 
         current_totals = calculate_current_total_throughput(df, cutoff_timestamp)
         print_current_total_throughput(current_totals, args.recent_minutes)
 
-        print_summary_info(df, len(progress_files), shards_completed, cutoff_timestamp)
+        print_summary_info(df, len(progress_files), shards_completed, cutoff_timestamp, shards if args.shards is not None else None)
         
 
 if __name__ == "__main__":
