@@ -1,9 +1,13 @@
-import polars as pl
 import argparse
 from pathlib import Path
+import time
+
+from loguru import logger
 from tabulate import tabulate
-from datetime import datetime
-import glob
+import polars as pl
+
+from inference_hive.config import load_job_config
+from inference_hive.slurm_utils import get_current_jobs, get_job_state_counts
 
 
 def read_progress_file(file_path: str) -> pl.DataFrame:
@@ -37,21 +41,6 @@ def read_progress_file(file_path: str) -> pl.DataFrame:
     return df_expanded
 
 
-def discover_progress_files(directory: str) -> list[str]:
-    """Discover all inference stats JSONL files in a directory"""
-    directory_path = Path(directory)
-    if not directory_path.exists():
-        raise FileNotFoundError(f"Directory '{directory}' not found")
-    
-    pattern = str(directory_path / "*-inference-stats.jsonl")
-    files = glob.glob(pattern)
-    
-    if not files:
-        raise FileNotFoundError(f"No inference stats files found in '{directory}'")
-    
-    return sorted(files)
-
-
 def load_and_combine_files(file_paths: list[str]) -> pl.DataFrame:
     """Load multiple progress files and combine them into a single DataFrame"""
     all_dataframes = []
@@ -72,15 +61,10 @@ def load_and_combine_files(file_paths: list[str]) -> pl.DataFrame:
     return combined_df
 
 
-def calculate_current_total_throughput(df: pl.DataFrame, recent_minutes: float = 2.0) -> dict:
-    """Calculate current total throughput from recent data across all active shards"""
+def calculate_current_total_throughput(df: pl.DataFrame, cutoff_timestamp: float) -> dict:
+    """Calculate current total throughput from recent data across all active shards using a precomputed cutoff timestamp"""
     if len(df) == 0:
         return {"active_shards": 0, "requests_ps": 0, "total_tps": 0, "prompt_tps": 0, "completion_tps": 0}
-    
-    # Use current time as reference point for "recent" data
-    import time
-    current_timestamp = time.time()
-    cutoff_timestamp = current_timestamp - (recent_minutes * 60)
     
     # Filter to recent data only
     recent_df = df.filter(pl.col("timestamp") >= cutoff_timestamp)
@@ -115,18 +99,19 @@ def calculate_current_total_throughput(df: pl.DataFrame, recent_minutes: float =
     }
 
 
-def calculate_per_shard_stats(df: pl.DataFrame, recent_minutes: float = 2.0) -> pl.DataFrame:
-    """Calculate statistics for each shard"""
+def calculate_per_shard_stats(df: pl.DataFrame, cutoff_timestamp: float, target_shards: list[int] = None) -> pl.DataFrame:
+    """Calculate statistics for each shard using a precomputed cutoff timestamp"""
     if len(df) == 0:
         return pl.DataFrame()
     
-    # Get total number of shards from the data
-    num_shards = df.select(pl.col("num_shards").first()).item()
-    
-    # Calculate cutoff for "running" status (recent activity)
-    import time
-    current_timestamp = time.time()
-    cutoff_timestamp = current_timestamp - (recent_minutes * 60)
+    # Determine which shards to include in the report
+    if target_shards is not None:
+        # Use only the specified target shards
+        shards_to_show = target_shards
+    else:
+        # Use all shards from configuration
+        num_shards = df.select(pl.col("num_shards").first()).item()
+        shards_to_show = list(range(num_shards))
     
     # Get the latest record for each shard that has data
     latest_per_shard = df.group_by("shard").agg([
@@ -135,6 +120,8 @@ def calculate_per_shard_stats(df: pl.DataFrame, recent_minutes: float = 2.0) -> 
         pl.col("completed").last().alias("completed"),
         pl.col("total").last().alias("total"),
         pl.col("eta_formatted").last().alias("eta_formatted"),
+        # Number of entries (rows) in the shard's log
+        pl.len().alias("entries"),
         pl.col("overall_requests_ps").mean().alias("avg_requests_ps"),
         pl.col("overall_total_tps").mean().alias("avg_total_tps"),
         pl.col("overall_prompt_tps").mean().alias("avg_prompt_tps"),
@@ -142,15 +129,15 @@ def calculate_per_shard_stats(df: pl.DataFrame, recent_minutes: float = 2.0) -> 
     ]).with_columns([
         # Calculate progress percentage
         (pl.col("completed") / pl.col("total") * 100).alias("progress_pct"),
-        # Determine if shard is currently running based on recent activity
+        # Determine if shard is currently active based on recent activity
         pl.when(pl.col("latest_timestamp") >= cutoff_timestamp)
-        .then(pl.lit("Running"))
-        .otherwise(pl.lit("Not Running"))
+        .then(pl.lit("active"))
+        .otherwise(pl.lit("inactive"))
         .alias("status")
     ])
     
-    # Create a complete list of all shards (0 to num_shards-1)
-    all_shards = pl.DataFrame({"shard": list(range(num_shards))})
+    # Create a complete list of target shards
+    all_shards = pl.DataFrame({"shard": shards_to_show})
     
     # Left join to include all shards, even those without data
     complete_stats = all_shards.join(latest_per_shard, on="shard", how="left").with_columns([
@@ -158,10 +145,77 @@ def calculate_per_shard_stats(df: pl.DataFrame, recent_minutes: float = 2.0) -> 
         pl.when(pl.col("latest_timestamp").is_null())
         .then(pl.lit("No Data"))
         .otherwise(pl.col("status"))
-        .alias("status")
+        .alias("status"),
+        # For shards with no data, entries should be 0
+        pl.when(pl.col("entries").is_null())
+        .then(pl.lit(0))
+        .otherwise(pl.col("entries"))
+        .alias("entries")
     ]).sort("shard")
     
     return complete_stats
+
+
+
+def print_per_shard_stats(shard_stats: pl.DataFrame, shards_completed: list[int]):
+    """Print per-shard statistics table including completion status"""
+    if len(shard_stats) == 0:
+        print("\nNo shard data available")
+        return
+    
+    # Prepare table data
+    table_data = []
+    active_shards = 0
+    
+    for row in shard_stats.iter_rows(named=True):
+        status = row['status'] if row['status'] is not None else "No Data"
+        
+        # Count active shards
+        if status == "active":
+            active_shards += 1
+        
+        # Check if this shard has data
+        if row['latest_datetime'] is None:
+            # Shard has no data
+            table_data.append([
+                f"Shard {row['shard']}",
+                str(row['shard'] in shards_completed),
+                "-",
+                "0",
+                status,
+                "-",
+                "-",
+                "-", 
+                "-",
+                "-",
+                "-"
+            ])
+        else:
+            # Shard has data
+            progress_pct = f"{row['progress_pct']:.1f}%" if row['progress_pct'] is not None else "-"
+            table_data.append([
+                f"Shard {row['shard']}",
+                str(row['shard'] in shards_completed),
+                progress_pct,
+                str(row['entries']) if row['entries'] is not None else "0",
+                status,
+                f"{row['avg_requests_ps']:.1f}" if row['avg_requests_ps'] is not None else "-",
+                f"{row['avg_total_tps']:.1f}" if row['avg_total_tps'] is not None else "-",
+                f"{row['avg_prompt_tps']:.1f}" if row['avg_prompt_tps'] is not None else "-",
+                f"{row['avg_completion_tps']:.1f}" if row['avg_completion_tps'] is not None else "-",
+                row['latest_datetime'].strftime('%Y-%m-%d %H:%M:%S'),
+                row['eta_formatted'] or "N/A"
+            ])
+    
+    headers = [
+        "Shard", "Completed", "Progress %", "Entries", "Status", "RPS", "Total TPS", 
+        "Prompt TPS", "Compl TPS", "Last Update", "ETA"
+    ]
+    
+    total_shards = len(shard_stats)
+    print(f"\nPER-SHARD STATISTICS ({active_shards}/{total_shards} shards active)")
+    print(f"{'='*90}")
+    print(tabulate(table_data, headers=headers, tablefmt="grid"))
 
 
 def print_current_total_throughput(totals: dict, recent_minutes: float):
@@ -178,65 +232,8 @@ def print_current_total_throughput(totals: dict, recent_minutes: float):
     print(tabulate(table_data, headers=["Metric", "Rate"], tablefmt="grid"))
 
 
-def print_per_shard_stats(shard_stats: pl.DataFrame):
-    """Print per-shard statistics table"""
-    if len(shard_stats) == 0:
-        print("\nNo shard data available")
-        return
-    
-    # Prepare table data
-    table_data = []
-    running_shards = 0
-    
-    for row in shard_stats.iter_rows(named=True):
-        status = row['status'] if row['status'] is not None else "No Data"
-        
-        # Count running shards
-        if status == "Running":
-            running_shards += 1
-        
-        # Check if this shard has data
-        if row['latest_datetime'] is None:
-            # Shard has no data
-            table_data.append([
-                f"Shard {row['shard']}",
-                "-",
-                status,
-                "-",
-                "-",
-                "-", 
-                "-",
-                "-",
-                "-"
-            ])
-        else:
-            # Shard has data
-            progress_pct = f"{row['progress_pct']:.1f}%" if row['progress_pct'] is not None else "-"
-            table_data.append([
-                f"Shard {row['shard']}",
-                progress_pct,
-                status,
-                f"{row['avg_requests_ps']:.1f}" if row['avg_requests_ps'] is not None else "-",
-                f"{row['avg_total_tps']:.1f}" if row['avg_total_tps'] is not None else "-",
-                f"{row['avg_prompt_tps']:.1f}" if row['avg_prompt_tps'] is not None else "-",
-                f"{row['avg_completion_tps']:.1f}" if row['avg_completion_tps'] is not None else "-",
-                row['latest_datetime'].strftime('%Y-%m-%d %H:%M:%S'),
-                row['eta_formatted'] or "N/A"
-            ])
-    
-    headers = [
-        "Shard", "Progress %", "Status", "RPS", "Total TPS", 
-        "Prompt TPS", "Compl TPS", "Last Update", "ETA"
-    ]
-    
-    total_shards = len(shard_stats)
-    print(f"\nPER-SHARD STATISTICS ({running_shards}/{total_shards} shards running)")
-    print(f"{'='*90}")
-    print(tabulate(table_data, headers=headers, tablefmt="grid"))
-
-
-def print_summary_info(df: pl.DataFrame, num_files: int, recent_minutes: float = 2.0):
-    """Print additional summary information"""
+def print_summary_info(df: pl.DataFrame, num_files: int, shards_completed=None, cutoff_timestamp: float = None, target_shards: list[int] = None):
+    """Print additional summary information, including completed shard count. Uses a precomputed cutoff timestamp for activity."""
     if len(df) == 0:
         return
     
@@ -245,15 +242,18 @@ def print_summary_info(df: pl.DataFrame, num_files: int, recent_minutes: float =
     last_timestamp = df.select(pl.col("timestamp").max()).item()
     duration_minutes = (last_timestamp - first_timestamp) / 60
     
-    # Get total configured shards vs active shards vs running shards
-    total_shards = df.select(pl.col("num_shards").first()).item()
-    active_shards = df.select(pl.col("shard").n_unique()).item()
+    # Get total configured shards vs active shards
+    if target_shards is not None:
+        total_shards = len(target_shards)
+        shards_with_data = df.select(pl.col("shard").n_unique()).item()
+    else:
+        total_shards = df.select(pl.col("num_shards").first()).item()
+        shards_with_data = df.select(pl.col("shard").n_unique()).item()
     
-    # Calculate running shards (recent activity)
-    import time
-    current_timestamp = time.time()
-    cutoff_timestamp = current_timestamp - (recent_minutes * 60)
-    running_shards = df.filter(pl.col("timestamp") >= cutoff_timestamp).select(pl.col("shard").n_unique()).item() or 0
+    # Calculate active shards (recent activity)
+    if cutoff_timestamp is None:
+        cutoff_timestamp = time.time()
+    active_shards = df.filter(pl.col("timestamp") >= cutoff_timestamp).select(pl.col("shard").n_unique()).item() or 0
     
     # Get overall progress considering ALL shards (including those not started)
     latest_per_shard = df.group_by("shard").agg([
@@ -287,77 +287,120 @@ def print_summary_info(df: pl.DataFrame, num_files: int, recent_minutes: float =
         else:
             longest_eta = "N/A"
     
+    completed_shards_count = len(shards_completed) if shards_completed else 0
+
     summary_data = [
-        ["Total Shards", f"{total_shards}"],
-        ["Shards w/ Data", f"{active_shards}"],
-        ["Running Shards", f"{running_shards}"],
+        ["Total shards", f"{total_shards}"],
+        ["Shards completed", f"{completed_shards_count}"],
+        ["Shards w/ data", f"{shards_with_data}"],
+        ["Active shards", f"{active_shards}"],
         ["Duration", f"{duration_minutes:.1f} minutes"],
-        ["Total Completed", f"{total_completed:,}"],
-        ["Total Requests", f"{total_requests_all_shards:,}"],
-        ["Overall Progress", f"{overall_progress:.1f}%"],
+        ["Total completed", f"{total_completed:,}"],
+        ["Total requests", f"{total_requests_all_shards:,}"],
+        ["Overall progress", f"{overall_progress:.1f}%"],
         ["Longest ETA", longest_eta]
     ]
     
-    print(f"\nSUMMARY")
+    print("\nSUMMARY")
     print(f"{'='*30}")
     print(tabulate(summary_data, tablefmt="simple"))
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Analyze multi-shard inference progress and throughput statistics",
-    )
-    
-    parser.add_argument(
-        "path",
-        help="Path to directory containing JSONL files or single JSONL file"
-    )
-    
-    parser.add_argument(
-        "--recent-minutes",
-        type=float,
-        default=2.0,
-        help="Time window in minutes for calculating current throughput (default: 2.0)"
-    )
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--recent-minutes", type=float, default=5.0)
+    parser.add_argument("--detailed", action="store_true", default=False)
+    parser.add_argument("--shards", type=int, nargs="*", help="Optional list of specific shard numbers to monitor . If not provided, all shards are monitored.")
     args = parser.parse_args()
-    
-    # Check if input is file or directory
-    input_path = Path(args.path)
-    if not input_path.exists():
-        parser.error(f"Path '{input_path}' not found")
-    
-    try:
-        if input_path.is_file():
-            # Single file mode
-            print(f"Processing single file: {input_path.name}")
-            df = read_progress_file(str(input_path))
-            num_files = 1
-            print(f"Loaded {len(df):,} data points")
-        else:
-            # Directory mode
-            print(f"Discovering files in directory: {input_path}")
-            file_paths = discover_progress_files(str(input_path))
-            print(f"Found {len(file_paths)} files")
-            
-            df = load_and_combine_files(file_paths)
-            num_files = len(file_paths)
-            print(f"Total data points: {len(df):,}")
-        
-        # Calculate and display per-shard statistics
-        shard_stats = calculate_per_shard_stats(df, args.recent_minutes)
-        print_per_shard_stats(shard_stats)
-        
-        # Calculate and display current total throughput
-        current_totals = calculate_current_total_throughput(df, args.recent_minutes)
-        print_current_total_throughput(current_totals, args.recent_minutes)
-        
-        # Display summary information
-        print_summary_info(df, num_files, args.recent_minutes)
-        
-    except Exception as e:
-        parser.error(f"Error processing files: {e}")
 
+    # args=argparse.Namespace()
+    # args.run_dir = Path("fw2_annotations_run3")
+    # args.recent_minutes = 2
+
+    config = load_job_config(args.run_dir / "ih_config.yaml")
+
+    # Determine which shards to monitor
+    if args.shards is not None:
+        # Validate that requested shards are within valid range
+        max_shard = config.num_inference_servers - 1
+        invalid_shards = [s for s in args.shards if s < 0 or s > max_shard]
+        if invalid_shards:
+            logger.error(f"Invalid shard numbers: {invalid_shards}. Valid range is 0-{max_shard}")
+            return
+        shards = sorted(args.shards)
+        logger.info(f"Monitoring specific shards: {shards}")
+    else:
+        shards = list(range(config.num_inference_servers))
+
+    try:
+        jobs = get_current_jobs(job_name=config.job_name)
+    except Exception as e:
+        logger.error(f"Error getting current jobs: {e}")
+        raise e
+
+    if jobs:
+        for job in jobs:
+            job['shard'] = int(job["name"].split("-")[-1]) -1
+        jobs.sort(key=lambda x: x["shard"])
+
+        logger.info(f"Found {len(jobs)} existing jobs for {config.job_name}")
+        for state, count in get_job_state_counts(jobs).items():
+            logger.info(f"    {count}/{len(jobs)} {state}")
+    else:
+        logger.info(f"No existing jobs found for {config.job_name}")
+    
+    shards_completed_file = Path(args.run_dir / "progress" / "shards_completed.log")
+
+    if shards_completed_file.exists():
+        shards_completed = [int(line.strip()) for line in shards_completed_file.read_text().splitlines()]
+    else:
+        shards_completed = []
+    
+    job_by_shard = {job["shard"]: job for job in jobs}
+    headers = ["Shard", "Completed", "State", "JobID"]
+    rows = []
+    for shard in shards:
+        job = job_by_shard.get(shard)
+        state = job.get("job_state") if job else "-"
+        job_id = job.get("job_id", "-") if job else "-"
+        completed = str(shard in shards_completed)
+        rows.append([shard, completed, state, job_id])
+    table_str = "\n" + tabulate(rows, headers=headers, tablefmt="github") + "\n"
+    print(table_str)
+
+    if args.detailed:
+
+        # Capture a single reference timestamp once before loading data to avoid processing-delay drift
+        reference_timestamp = time.time()
+        cutoff_timestamp = reference_timestamp - (args.recent_minutes * 60)
+        cutoff_human = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(cutoff_timestamp))
+        reference_human = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(reference_timestamp))
+        logger.info(f"Using cutoff based on system time: cutoff={cutoff_human}, reference={reference_human}, window={args.recent_minutes} min")
+
+        progress_files = []
+        for shard in shards:
+            progress_file = Path(args.run_dir / "progress" / f"{shard+1}-progress.jsonl")
+            if progress_file.exists() and progress_file.stat().st_size > 0:
+                progress_files.append(progress_file)
+
+        logger.info(f"Found {len(progress_files)} progress files")
+        if not progress_files:
+            logger.info("No progress files found - exiting.")
+            return
+        
+        logger.info(f"Loading {len(progress_files)} progress files")
+        df = load_and_combine_files(progress_files)
+        logger.info(f"Total data points: {len(df):_}")
+
+        shard_stats = calculate_per_shard_stats(df, cutoff_timestamp, shards if args.shards is not None else None)
+        print_per_shard_stats(shard_stats, shards_completed)
+
+        current_totals = calculate_current_total_throughput(df, cutoff_timestamp)
+        print_current_total_throughput(current_totals, args.recent_minutes)
+
+        print_summary_info(df, len(progress_files), shards_completed, cutoff_timestamp, shards if args.shards is not None else None)
+        
 
 if __name__ == "__main__":
-    main() 
+    main()

@@ -1,24 +1,23 @@
 import argparse
+import gc
 import sys
-from pathlib import Path
+import os
+from itertools import islice
 
-import datasets as hfds
 from loguru import logger
 from openai.types.chat import ChatCompletionMessageParam
 from pydantic import TypeAdapter, ValidationError
 
-from config import load_config_for_validation
+from inference_hive.config import load_config_for_validation
+from inference_hive.data_utils import load_data
+from inference_hive import udf
 
 
-def validate_input_data_format(ds, input_column_name: str, id_column_name: str, api_type: str):
+def validate_input_data_format(sample_rows, input_column_name: str, id_column_name: str, api_type: str, log_samples: bool = True):
     """Validate that the input data format matches the expected API type format"""
-    if len(ds) == 0:
+    if len(sample_rows) == 0:
         logger.warning("Empty dataset, skipping format validation")
         return
-    
-    # Sample a few rows to check format (up to 10 rows)
-    sample_size = min(10, len(ds))
-    sample_rows = ds.select(range(sample_size))
     
     for i, row in enumerate(sample_rows):
         if input_column_name not in row:
@@ -81,7 +80,33 @@ def validate_input_data_format(ds, input_column_name: str, id_column_name: str, 
             raise ValueError(f"Invalid API type: {api_type}")
     
     logger.info(f"Input data format validation passed for api_type='{api_type}' with string ID column '{id_column_name}' using OpenAI's pydantic models")
-
+    
+    if log_samples:
+        logger.info("Sample rows:")
+        logger.info("=" * 80)
+        
+        for i, row in enumerate(sample_rows):
+            row_id = row[id_column_name]
+            data = row[input_column_name]
+            
+            logger.info("-" * 40)
+            logger.info(f"Sample {i+1}/{len(sample_rows)}")
+            logger.info(f"{row_id=}")
+            
+            if api_type == "completion":
+                # For completion API, show the prompt string
+                logger.info(f"Prompt:\n{data}")
+            
+            elif api_type == "chat-completion":
+                # For chat-completion API, show formatted messages
+                logger.info("Messages:")
+                for j, message in enumerate(data):
+                    role = message['role']
+                    content = message['content']
+                    logger.info(f"[{j+1}]\n{role=}\n{content=}")
+            
+        logger.info("=" * 80)
+    
 
 def validate_dataset_from_config(config_path: str, shard: int | None = None, num_shards: int | None = None):
     """
@@ -96,45 +121,38 @@ def validate_dataset_from_config(config_path: str, shard: int | None = None, num
     config = load_config_for_validation(config_path)
     
     logger.info("Loading dataset for validation...")
-    if config['use_load_from_disk']:
-        logger.info("Loading dataset with load_from_disk")
-        ds = hfds.load_from_disk(config['dataset_path'])
-    else:
-        logger.info(f"Loading dataset with load_dataset with kwargs: {config['load_dataset_kwargs']}")
-        kwargs = config['load_dataset_kwargs']
-        ds = hfds.load_dataset(str(config['dataset_path']), **kwargs)
-
-    # Check if dataset is a DatasetDict and raise error
-    if isinstance(ds, (hfds.DatasetDict, hfds.IterableDatasetDict)):
-        available_splits = list(ds.keys())
-        raise ValueError(
-            f"Dataset is a DatasetDict with splits: {available_splits}. "
-            "Please specify a split in your load_dataset_kwargs (e.g., 'split': 'train')"
-        )
+    logger.info(f"Config: {config}")
+    ds = load_data(config, shard, num_shards)
+    logger.info(f"Dataset {shard=} loaded: {len(ds)} rows")
+    logger.info(f"{ds}")
     
-    # Check if dataset is an IterableDataset and raise error
-    if isinstance(ds, hfds.IterableDataset):
-        raise ValueError(
-            "IterableDataset is currently not supported. Use a regular Dataset instead (streaming=False)."
-        )
-
-    # Apply sharding if specified
-    if shard is not None and num_shards is not None:
-        logger.info(f"Applying shard {shard} of {num_shards} for validation")
-        ds = ds.shard(num_shards=num_shards, index=shard)
-    
-    logger.info(f"Dataset loaded: {len(ds)} rows")
-    
-    # Validate the dataset format
+    # Validate the dataset format using a small sample (apply UDF if configured)
     logger.info("Starting data validation...")
+    sample_size = 10
+    raw_sample_rows = list(islice(ds, sample_size))
+
+    if config.apply_udf:
+        try:
+            udf_func = getattr(udf, config.apply_udf)
+        except AttributeError:
+            raise ValueError(f"UDF function '{config.apply_udf}' not found in udf.py")
+        sample_rows = [udf_func(row, **(config.apply_udf_kwargs or {})) for row in raw_sample_rows]
+    else:
+        sample_rows = raw_sample_rows
+
     validate_input_data_format(
-        ds, 
-        config['input_column_name'], 
-        config['id_column_name'], 
-        config['api_type']
+        sample_rows,
+        config.input_column_name,
+        config.id_column_name,
+        config.api_type,
     )
     
     logger.info("✓ Data validation completed successfully!")
+    # Proactively free dataset/Arrow resources before exiting, to prevent segfaults
+    try:
+        del ds
+    except Exception:
+        pass
     return True
 
 
@@ -174,10 +192,11 @@ def main():
     try:
         validate_dataset_from_config(args.config, args.shard, args.num_shards)
         logger.info("Data validation passed! Dataset is ready for inference.")
-        sys.exit(0)
+        gc.collect()
+        os._exit(0)
     except Exception as e:
         logger.error(f"Data validation failed: {e}")
-        sys.exit(1)
+        os._exit(1)
 
 
 if __name__ == "__main__":

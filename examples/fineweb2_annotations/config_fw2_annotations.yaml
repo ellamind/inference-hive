@@ -1,39 +1,32 @@
-# This is an example configuration file for running fineweb2-annotations on Leonardo (CINECA).
-#
 # === SLURM Configuration ===
 # Consult your cluster's documentation if you are unsure about the values below.
-job_name: "fw2-annotations-deu_Latn-1M"
+job_name: "fw2-annotations-deu-1M"
 partition: "boost_usr_prod"
 account: "AIFAC_L01_028"
-qos: "normal"
-cpus_per_node: 32
+qos: "boost_qos_dbg"
+cpus_per_node: 32 # cpu is not really needed for our workload.
 memory_per_node: "0" # "0" for all available memory per node
 gres_per_node: "gpu:4" # Generic resources per node. Examples: "gpu:4", "a100:1", "gpu:h100:8"
-time_limit: "24:00:00" # Max walltime on cluster. Automatically resubmits individual tasks if they exceed time limit.
+time_limit: "29:00" # Max walltime on cluster. Jobs are automatically resubmitted if they exceed time limit.
 # Additional SBATCH arguments (optional)
 additional_sbatch_args:
-  exclude: "lrdn[0032,0701]"  # Exclude specific nodes
+  # exclude: "node[001-010]"  # Exclude specific nodes
 
 
 # === Scaling Configuration ===
-num_inference_servers: 8
-num_nodes_per_inference_server: 1 # For now we support only 1 node per inference server.
 # The total number of nodes will be num_inference_servers * num_nodes_per_inference_server.
-
-# Each inference_server processes one shard of data. For very large datasets you can use more shards than inference servers for checkpointing. However, only num_inference_servers shards will be processed in parallel.
-num_data_shards:
-
+num_inference_servers: 2
+num_nodes_per_inference_server: 1 # Increase this only of your model requires more than 1 node per inference server.
 
 # === Environment Configuration ===
-pixi_manifest: "pixi.toml"  # Path to the pixi manifest file. Edit if you want to use one of the pre-installed environments (see README.md).
-pixi_env: "cuda-vllm"  # Name of te pixi environment to use.
+pixi_manifest: "pixi.toml"  # Path to the pixi manifest file. Edit only if you want to use one of the pre-installed environments (see README.md).
+pixi_env: "cuda-vllm"  # Name of the pixi environment to use (see README.md).
 env_vars:
   HF_HUB_OFFLINE: "1" # you should download data and model beforehand
   VLLM_DISABLE_COMPILE_CACHE: "1" # multiple vLLM instances on shared filesystem can cause problems
 
 
 # === Inference Server Configuration ===
-# small model, we can use data parallelism
 inference_server_command: > 
   python -m vllm.entrypoints.openai.api_server
   --host=localhost
@@ -44,10 +37,12 @@ inference_server_command: >
   --max-model-len=16384
   --trust-remote-code
   --gpu-memory-utilization=0.9
-  --disable-log-requests
+  --max-log-len=10
 
 
 # === Health Check Configuration ===
+# max_wait_minutes is the maximum time to wait for the API server to become healthy.
+# make sure it is reasonable for loading the model. larger models will take longer.
 health_check_max_wait_minutes: 10  # Maximum time to wait for API server to become healthy.
 health_check_interval_seconds: 20  # Interval between health check attempts
 
@@ -56,19 +51,23 @@ health_check_interval_seconds: 20  # Interval between health check attempts
 # make sure port is the same as in inference_server_command.
 api_base_url: "http://localhost:64776/v1"
 api_type: "chat-completion"  # "chat-completion" or "completion"
-# make sure model is the same as in inference_server_command.
+# make sure model is set to the exact same string as in inference_server_command. 
 model: "Qwen/Qwen3-4B"
 
 
 # === Dataset Configuration ===
+dataset_type: "hf-disk" # must one of "hf", "hf-disk" or "parquet"
 dataset_path: "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/fineweb2-deu_Latn-1M-chat-completion" # hf identifier or local path
+# id_column_name must contain unique string identifiers for each row. The IDs will be used to match responses with input rows.
+id_column_name: "id"
 # input_column_name must contain strings for completion or messages for chat-completion.
 input_column_name: "conversation"
-id_column_name: "id"
-use_load_from_disk: true
+apply_udf: # Can be set to a name of a UDF in udf.py to apply to dataset rows.
+apply_udf_kwargs: {} # kwargs to pass to the UDF.
+
 
 # Dataset Loading Arguments
-load_dataset_kwargs:
+dataset_kwargs:
   # name: "deu_Latn"
   # split: "train"
   # cache_dir: "/path/to/cache"
@@ -81,8 +80,8 @@ output_path: "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/example_outpu
 # === Completion Arguments ===
 # for completion and chat-completion
 completions_kwargs:
-  temperature: 0.3
-  # max_tokens: 512
+  # temperature: 0.6
+  # max_tokens: 100
   # top_p: 1.0
   # frequency_penalty: 0.0
   # presence_penalty: 0.0
@@ -90,5 +89,5 @@ completions_kwargs:
 
 
 # === Connection Settings ===
-max_connections: 200
+max_connections: 100 # Use less connections for large models. Can use 100+ for smaller models.
 max_retries: 3

@@ -62,15 +62,15 @@ model: "google/gemma-3-27b-it"
 
 
 # === Dataset Configuration ===
+dataset_type: "hf-disk"
 dataset_path: "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/fineweb-edu-mt-chat-completion" # hf identifier or local path
 # input_column_name must contain strings for completion or messages for chat-completion.
 input_column_name: "conversation"
 # id_column_name must contain unique string identifiers for each row. The IDs will be used to match responses with input rows.
 id_column_name: "id"
-use_load_from_disk: true
 
 # Dataset Loading Arguments
-load_dataset_kwargs:
+dataset_kwargs:
   # name: "deu_Latn"
   # split: "train"
   # cache_dir: "/path/to/cache"

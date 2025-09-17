@@ -4,7 +4,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from config import load_job_config
+from inference_hive.config import load_job_config
 
 
 SBATCH_TEMPLATE = """#!/bin/bash
@@ -12,7 +12,7 @@ SBATCH_TEMPLATE = """#!/bin/bash
 #SBATCH --partition={partition}
 #SBATCH --account={account}
 #SBATCH --qos={qos}
-#SBATCH --array=1-{array_size}%{num_inference_servers}
+##SBATCH --array=1-{num_inference_servers}
 #SBATCH --nodes={num_nodes_per_inference_server}
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task={cpus_per_node}
@@ -20,8 +20,8 @@ SBATCH_TEMPLATE = """#!/bin/bash
 #SBATCH --gres={gres_per_node}
 #SBATCH --time={time_limit}
 #SBATCH --signal=B:SIGUSR1@120
-#SBATCH --output={log_dir}/%A-%a-%N.log
-#SBATCH --error={log_dir}/%A-%a-%N.log
+#SBATCH --output={log_dir}/%a-%A-%N.log
+#SBATCH --error={log_dir}/%a-%A-%N.log
 {additional_sbatch_lines}
 
 # Print job information
@@ -38,9 +38,8 @@ echo "============================="
 
 # Check if this shard is already completed
 CURRENT_SHARD=$((SLURM_ARRAY_TASK_ID - 1))
-COMPLETED_SHARDS_FILE="{log_dir}/shards_completed.log"
-FAILED_SHARDS_FILE="{log_dir}/shards_failed.log"
-
+COMPLETED_SHARDS_FILE="{progress_dir}/shards_completed.log"
+FAILED_SHARDS_FILE="{progress_dir}/shards_failed.log"
 
 
 set -e
@@ -77,6 +76,7 @@ fi
 
 cleanup() {{
     local signal=$1
+    log "INFO" "Received signal $signal, initiating cleanup..."
     if [ "$signal" = "SIGUSR1" ]; then
         log "WARN" "Job is about to hit time limit, shutting down gracefully..."
     elif [ "$signal" = "SIGTERM" ]; then
@@ -96,11 +96,16 @@ cleanup() {{
     # give the inference script some time before shutting down the inference server
     sleep 10 
 
-    # Send SIGINT to inference server process group
+    # Send two SIGINTs to inference server srun process group (srun expects two to abort)
     if [ ! -z "$INFERENCE_SERVER_PID" ] && kill -0 $INFERENCE_SERVER_PID 2>/dev/null; then
-        log "INFO" "Sending SIGINT to inference server process group (PID: $INFERENCE_SERVER_PID)"
+        log "INFO" "Sending SIGINT x2 to inference server srun process group (PID: $INFERENCE_SERVER_PID)"
         # Send signal to the entire process group using negative PID
         kill -INT -$INFERENCE_SERVER_PID 2>/dev/null || kill -INT $INFERENCE_SERVER_PID
+        # Short delay to ensure the second INT is within 1s window expected by srun
+        sleep 0.1
+        if kill -0 $INFERENCE_SERVER_PID 2>/dev/null; then
+            kill -INT -$INFERENCE_SERVER_PID 2>/dev/null || kill -INT $INFERENCE_SERVER_PID
+        fi
     fi
 
     log "INFO" "Waiting for processes to finish gracefully..."
@@ -148,15 +153,16 @@ cleanup() {{
     
     # Only resubmit if this was a time limit signal, not a manual cancellation
     # Resubmit instead of requeue since requeue is disabled on many clusters.
+    sbatch_command=(sbatch --array="${{SLURM_ARRAY_TASK_ID}}" --job-name="{job_name}-$(printf '%06d' "${{SLURM_ARRAY_TASK_ID}}")" "{output_dir}/ih_job.slurm")
     if [ "$signal" = "SIGUSR1" ]; then
         log "INFO" "Resubmitting task ${{SLURM_ARRAY_TASK_ID}} automatically due to time limit..."
-        sbatch_output=$(sbatch --array=${{SLURM_ARRAY_TASK_ID}} "{log_dir}/{job_name}.slurm" 2>&1)
-        if [ $? -eq 0 ]; then
+        log "INFO" "Running command: ${{sbatch_command[*]}}"
+        if sbatch_output="$("${{sbatch_command[@]}}" 2>&1)"; then
             new_job_id=$(echo "$sbatch_output" | grep -o '[0-9]*')
-            log "INFO" "Task ${{SLURM_ARRAY_TASK_ID}} resubmitted successfully as job ${{new_job_id}}. Progress will resume from where it left off."
+            log "INFO" "Task ${{SLURM_ARRAY_TASK_ID}} resubmitted successfully as job ${{new_job_id}}. Progress will resume from checkpoint."
         else
             log "ERROR" "Failed to resubmit task ${{SLURM_ARRAY_TASK_ID}}. Error: $sbatch_output"
-            log "ERROR" "You may need to resubmit manually: sbatch --array=${{SLURM_ARRAY_TASK_ID}} {log_dir}/{job_name}.slurm"
+            log "ERROR" "You may need to resubmit manually: ${{sbatch_command[*]}}"
             # Mark as failed since resubmission failed
             log_failed_shard "resubmission_failed" "Failed to resubmit after time limit: $sbatch_output"
         fi
@@ -168,7 +174,7 @@ cleanup() {{
             log_failed_shard "unexpected_signal" "Job received signal: $signal"
         fi
         log "INFO" "Task ${{SLURM_ARRAY_TASK_ID}} was manually cancelled - not resubmitting automatically."
-        log "INFO" "To restart this task later, run: sbatch --array=${{SLURM_ARRAY_TASK_ID}} {log_dir}/{job_name}.slurm"
+        log "INFO" "To restart this task later, run: ${{sbatch_command[*]}}"
     fi
     
     exit 0
@@ -205,7 +211,7 @@ log "INFO" "Dataset validation passed for shard ${{CURRENT_SHARD}}"
 
 # Start inference server
 log "INFO" "Starting inference server on ${{SLURM_JOB_NUM_NODES}} nodes"
-INFERENCE_SERVER_LOG="{log_dir}/${{SLURM_ARRAY_JOB_ID:-${{SLURM_JOB_ID}}}}-${{SLURM_ARRAY_TASK_ID}}-%N-inference-server.log"
+INFERENCE_SERVER_LOG="{log_dir}/${{SLURM_ARRAY_TASK_ID}}-${{SLURM_JOB_ID}}-%N-inference-server.log"
 INFERENCE_SERVER_COMMAND="{inference_server_command}"
 log "INFO" "Inference server command: ${{INFERENCE_SERVER_COMMAND}}"
 setsid srun --output="$INFERENCE_SERVER_LOG" --error="$INFERENCE_SERVER_LOG" \\
@@ -275,16 +281,16 @@ fi
 
 # Run inference
 log "INFO" "Running inference"
-INFERENCE_PROGRESS_LOG="{log_dir}/${{SLURM_ARRAY_JOB_ID:-${{SLURM_JOB_ID}}}}-${{SLURM_ARRAY_TASK_ID}}-${{HOSTNAME}}-inference-stats.jsonl"
+INFERENCE_PROGRESS_LOG="{progress_dir}/${{SLURM_ARRAY_TASK_ID}}-progress.jsonl"
 # Start inference in a new process group so we can kill the entire group
-setsid python run_inference.py --config {config_path} --num-shards {num_data_shards} --shard $((SLURM_ARRAY_TASK_ID - 1)) --log-file $INFERENCE_PROGRESS_LOG &
+setsid python run_inference.py --config {config_path} --num-shards {num_data_shards} --shard ${{CURRENT_SHARD}} --log-file $INFERENCE_PROGRESS_LOG &
 INFERENCE_PID=$!
 wait $INFERENCE_PID
 INFERENCE_EXIT_CODE=$?
 
 if [ $INFERENCE_EXIT_CODE -eq 0 ]; then
     log "INFO" "Inference completed successfully, recording shard completion"
-    echo "$((SLURM_ARRAY_TASK_ID - 1))" >> "{log_dir}/completed_shards.log"
+    echo "$((SLURM_ARRAY_TASK_ID - 1))" >> "$COMPLETED_SHARDS_FILE"
     log "INFO" "Done"
 else
     log "ERROR" "Inference failed with exit code $INFERENCE_EXIT_CODE"
@@ -329,7 +335,7 @@ def main():
         logger.error(f"Configuration validation error: {e}")
         return 1
 
-    # Ensure the output_path directory exists
+    # Ensure the output_path directory exists (where results will be written to)
     output_path = Path(config.output_path)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -341,19 +347,25 @@ def main():
             return 1
         else:
             logger.warning(f"Output directory '{output_dir}' already exists. Overwriting due to --force flag.")
-    else:
-        output_dir.mkdir(parents=True)
     
     # Ensure directory exists (in case --force was used but directory was removed)
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output directory: {output_dir}")
 
-    # Use output directory as log directory
-    config_dict["log_dir"] = str(output_dir)
 
-    # Set array size to total number of data shards
-    # The %num_inference_servers in SBATCH array directive limits concurrency
-    config_dict["array_size"] = config.num_data_shards
+
+    progress_dir = output_dir / "progress"
+    progress_dir.mkdir(exist_ok=True)
+
+    log_dir = output_dir / "logs"
+    log_dir.mkdir(exist_ok=True)
+    
+    config_dict["output_dir"] = str(output_dir)
+    config_dict["log_dir"] = str(log_dir)
+    config_dict["progress_dir"] = str(progress_dir)
+
+    # num_inference_servers is the number of data shards
+    config_dict["num_data_shards"] = config.num_inference_servers
 
     # Generate additional SBATCH lines
     additional_sbatch_lines = ""
@@ -373,7 +385,7 @@ def main():
     config_dict["env_exports"] = env_exports
 
     # Copy config file to output directory for reproducibility
-    config_copy_path = output_dir / config_path.name
+    config_copy_path = output_dir / "ih_config.yaml"
     try:
         shutil.copy2(config_path, config_copy_path)
         logger.info(f"Config copied to: {config_copy_path}")
@@ -381,9 +393,19 @@ def main():
         logger.warning(f"Could not copy config file: {e}")
     config_dict["config_path"] = str(config_copy_path)
 
+    # Copy udf.py file to output directory for reproducibility if apply_udf is used
+    if config.apply_udf:
+        udf_path = Path(__file__).parent / "udf.py"
+        udf_copy_path = output_dir / "udf.py"
+        try:
+            shutil.copy2(udf_path, udf_copy_path)
+            logger.info(f"UDF file copied to: {udf_copy_path}")
+        except Exception as e:
+            logger.warning(f"Could not copy UDF file: {e}")
+
     sbatch_script = SBATCH_TEMPLATE.format(**config_dict)
     
-    job_script_path = output_dir / f"{config_dict['job_name']}.slurm"
+    job_script_path = output_dir / "ih_job.slurm"
     try:
         with open(job_script_path, "w") as f:
             f.write(sbatch_script)
@@ -392,10 +414,7 @@ def main():
         logger.error(f"Error writing job script '{job_script_path}': {e}")
         return 1
 
-    logger.info(f"To submit the job: sbatch {job_script_path}")
-    logger.info(f"To cancel all jobs: scancel --name={config_dict['job_name']}")
-    logger.info(f"To check job status: squeue -u $USER --name={config_dict['job_name']}")
-    
+    logger.info(f"Run created at: {output_dir}")
     return 0
 
 

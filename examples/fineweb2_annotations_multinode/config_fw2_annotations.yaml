@@ -1,13 +1,13 @@
 # === SLURM Configuration ===
 # Consult your cluster's documentation if you are unsure about the values below.
-job_name: ""
-partition: ""
-account: ""
-qos: ""
+job_name: "fineweb2-annotations-qwen3"
+partition: "boost_usr_prod"
+account: "AIFAC_L01_028"
+qos: "normal"
 cpus_per_node: 32 # cpu is not really needed for our workload.
 memory_per_node: "0" # "0" for all available memory per node
 gres_per_node: "gpu:4" # Generic resources per node. Examples: "gpu:4", "a100:1", "gpu:h100:8"
-time_limit: "24:00:00" # Max walltime on cluster. Jobs are automatically resubmitted if they exceed time limit.
+time_limit: "1:00:00" # Max walltime on cluster. Jobs are automatically resubmitted if they exceed time limit.
 # Additional SBATCH arguments (optional)
 additional_sbatch_args:
   # exclude: "node[001-010]"  # Exclude specific nodes
@@ -16,7 +16,7 @@ additional_sbatch_args:
 # === Scaling Configuration ===
 # The total number of nodes will be num_inference_servers * num_nodes_per_inference_server.
 num_inference_servers: 1
-num_nodes_per_inference_server: 1 # For now we support only 1 node per inference server.
+num_nodes_per_inference_server: 4
 
 # Each inference_server processes one shard of data. For very large datasets you can opt for more shards than inference servers for checkpointing. However, only num_inference_servers shards will be processed in parallel.
 # This option can also be useful if you want to continue an incomplete run with a different number of inference servers.
@@ -25,7 +25,7 @@ num_data_shards: # leave empty to use num_inference_servers
 
 # === Environment Configuration ===
 pixi_manifest: "pixi.toml"  # Path to the pixi manifest file. Edit only if you want to use one of the pre-installed environments (see README.md).
-pixi_env: "cuda-vllm"  # Name of the pixi environment to use (see README.md).
+pixi_env: "cuda-sglang"  # Name of the pixi environment to use (see README.md).
 env_vars:
   HF_HUB_OFFLINE: "1" # you should download data and model beforehand
   VLLM_DISABLE_COMPILE_CACHE: "1" # multiple vLLM instances on shared filesystem can cause problems
@@ -33,22 +33,25 @@ env_vars:
 
 # === Inference Server Configuration ===
 inference_server_command: > 
-  python -m vllm.entrypoints.openai.api_server
+  python -m sglang.launch_server
   --host=localhost
   --port=64776
-  --model="Qwen/Qwen3-4B"
-  --tensor-parallel-size=1
-  --data-parallel-size=4
-  --max-model-len=16384
+  --dist-init-addr=\$MASTER_NODE:50033
+  --node-rank=\$SLURM_NODEID
+  --nnodes=\$SLURM_JOB_NUM_NODES
+  --tp-size=16
+  --ep-size=16
+  --model-path="/leonardo_scratch/fast/AIFAC_L01_028/models/Qwen/Qwen3-235B-A22B-Instruct-2507"
+  --context-length=64000
   --trust-remote-code
-  --gpu-memory-utilization=0.9
-  --max-log-len=10
+  --log-level=debug
+
 
 
 # === Health Check Configuration ===
 # max_wait_minutes is the maximum time to wait for the API server to become healthy.
 # make sure it is reasonable for loading the model. larger models will take longer.
-health_check_max_wait_minutes: 10  # Maximum time to wait for API server to become healthy.
+health_check_max_wait_minutes: 30  # Maximum time to wait for API server to become healthy.
 health_check_interval_seconds: 20  # Interval between health check attempts
 
 
@@ -57,16 +60,16 @@ health_check_interval_seconds: 20  # Interval between health check attempts
 api_base_url: "http://localhost:64776/v1"
 api_type: "chat-completion"  # "chat-completion" or "completion"
 # make sure model is the same as in inference_server_command.
-model: "Qwen/Qwen3-4B"
+model: "Qwen/Qwen3-235B-A22B-Instruct-2507"
 
 
 # === Dataset Configuration ===
-dataset_path: "" # hf identifier or local path
+dataset_path: "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/fineweb2-deu_Latn-1M-chat-completion" # hf identifier or local path
 # input_column_name must contain strings for completion or messages for chat-completion.
-input_column_name: "messages"
+input_column_name: "conversation"
 # id_column_name must contain unique string identifiers for each row. The IDs will be used to match responses with input rows.
 id_column_name: "id"
-use_load_from_disk: false
+use_load_from_disk: true
 
 # Dataset Loading Arguments
 load_dataset_kwargs:
@@ -76,7 +79,7 @@ load_dataset_kwargs:
 
 
 # === Output Configuration ===
-output_path: "" # responses will be saved here
+output_path: "/leonardo_work/AIFAC_L01_028/midahl00/inference-hive/example_outputs/fineweb2-deu_Latn-1M-responses-qwen3-235b" # responses will be saved here
 
 
 # === Completion Arguments ===
@@ -91,5 +94,5 @@ completions_kwargs:
 
 
 # === Connection Settings ===
-max_connections: 100
+max_connections: 1000
 max_retries: 3

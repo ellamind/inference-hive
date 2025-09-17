@@ -1,4 +1,4 @@
-# FineWeb-edu Machine Translation
+# FineWeb-edu Machine Translation (outdated)
 This example demonstrates how to translate a sample of FineWeb-edu documents with Gemma-3 using `inference-hive`.
 
 
@@ -33,7 +33,7 @@ We save the dataset as `fineweb-edu-mt-chat-completion` using `save_to_disk`.
 To prepare the dataset, run:
 
 ```bash
-pixi run python examples/fineweb-edu_machine_translation/prepare_dataset.py
+pixi run python examples/fineweb-edu_mt_gemma-3/prepare_dataset.py
 ```
 
 The out is is a new directory `fineweb-edu-mt-chat-completion` that contains the prepared dataset.
@@ -43,7 +43,7 @@ Make a copy of `config_template.yaml`:
 ```bash
 cp config_template.yaml config_fw-edu_mt.yaml
 ```
-Then fill the config file. We provide an example here, `examples/fineweb-edu_machine_translation/config_fw-edu_mt.yaml`, however, the `SLURM Configuration` section will likely differ for you. Also make sure to edit the dataset and output paths. In this example config, we set the number of inference servers to 2. Note that we set
+Then fill the config file. We provide an example here, `examples/fineweb-edu_mt_gemma-3/config_fw-edu_mt.yaml`, however, the `SLURM Configuration` section will likely differ for you. Also make sure to edit the dataset and output paths. In this example config, we set the number of inference servers to 2. Note that we set
 
 ```yaml
   extra_body: {continue_final_message: true, "add_generation_prompt": false} # we need to set these two for assistant prefill to work.

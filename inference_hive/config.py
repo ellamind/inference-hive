@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any, Literal
 
 
@@ -15,6 +15,9 @@ class BaseConfig(BaseModel):
     model: str = Field(..., description="Model identifier")
 
     # Dataset Configuration
+    dataset_type: Literal["hf", "hf-disk", "parquet"] = Field(
+        ..., description="Type of dataset to load. Must be one of 'hf', 'hf-disk', 'parquet'."
+    )
     dataset_path: Path = Field(..., description="Path to the dataset")
     input_column_name: str = Field(
         default="prompt", description="Name of the input column"
@@ -22,21 +25,26 @@ class BaseConfig(BaseModel):
     id_column_name: str = Field(
         default="id", description="Name of the ID column. Must contain unique string identifiers for each row."
     )
-    use_load_from_disk: bool = Field(
-        ..., description="Whether to load dataset from disk"
-    )
 
     # Output Configuration
     output_path: Path = Field(..., description="Path for output files")
 
     # Dataset Loading Arguments
-    load_dataset_kwargs: Optional[Dict[str, Any]] = Field(
-        default=None, description="Additional dataset loading arguments"
+    dataset_kwargs: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional dataset loading arguments that will be passed to the dataset loading function."
     )
 
     # Completion Arguments
     completions_kwargs: Optional[Dict[str, Any]] = Field(
         default=None, description="Arguments for completions"
+    )
+
+    # UDF Configuration
+    apply_udf: Optional[str] = Field(
+        default=None, description="Name of the UDF function in udf.py to apply to the dataset"
+    )
+    apply_udf_kwargs: Optional[Dict[str, Any]] = Field(
+        default=None, description="Additional kwargs to pass to the UDF function"
     )
 
     # Connection Settings
@@ -55,7 +63,7 @@ class BaseConfig(BaseModel):
     def convert_output_path_to_path(cls, v):
         return Path(v).absolute()
 
-    @field_validator("load_dataset_kwargs", "completions_kwargs", mode="before")
+    @field_validator("dataset_kwargs", "completions_kwargs", "apply_udf_kwargs", mode="before")
     @classmethod
     def convert_none_to_dict(cls, v):
         return v if v is not None else {}
@@ -74,9 +82,6 @@ class JobConfig(BaseConfig):
     )
     num_nodes_per_inference_server: int = Field(
         ..., gt=0, description="Number of nodes per inference server"
-    )
-    num_data_shards: Optional[int] = Field(
-        default=None, gt=0, description="Total number of data shards. If not specified, defaults to num_inference_servers. For very large datasets you can use more shards than inference servers for checkpointing. However, only num_inference_servers shards will be processed in parallel."
     )
     cpus_per_node: int = Field(..., gt=0, description="Number of CPUs per node")
     memory_per_node: str = Field(..., description="Memory per node in GB")
@@ -208,24 +213,6 @@ class JobConfig(BaseConfig):
         
         return v
 
-    @model_validator(mode="after")
-    def validate_and_set_num_data_shards(self):
-        """Validate and set num_data_shards with appropriate warnings."""
-        from loguru import logger
-        
-        # Set default if not specified
-        if self.num_data_shards is None:
-            self.num_data_shards = self.num_inference_servers
-            logger.info(f"num_data_shards not specified, defaulting to num_inference_servers ({self.num_inference_servers})")
-        
-        # Ensure num_data_shards is at least num_inference_servers
-        elif self.num_data_shards < self.num_inference_servers:
-            logger.warning(f"num_data_shards ({self.num_data_shards}) is smaller than num_inference_servers ({self.num_inference_servers}). "
-                          f"Setting num_data_shards to {self.num_inference_servers} to avoid idle inference servers.")
-            self.num_data_shards = self.num_inference_servers
-        
-        return self
-
 
 class InferenceConfig(BaseConfig):
     """Configuration for distributed offline inference (extends BaseConfig)"""
@@ -250,22 +237,27 @@ def load_inference_config(config_path: str | Path) -> InferenceConfig:
     return InferenceConfig(**config_data)
 
 
-def load_config_for_validation(config_path: str) -> Dict[str, Any]:
-    """Load and extract only the fields needed for data validation"""
+def load_config_for_validation(config_path: str) -> BaseConfig:
+    """Load and validate configuration for data validation purposes"""
     with open(config_path, "r") as f:
         config_data = yaml.safe_load(f)
     
-    # Extract only the fields we need for validation (no defaults, explicit config required)
-    required_fields = ['api_type', 'dataset_path', 'use_load_from_disk']
-    for field in required_fields:
-        if field not in config_data:
-            raise ValueError(f"Required field '{field}' missing from config file")
-    
-    return {
+    # Extract only the fields we need for validation
+    # We need to provide minimal required fields for BaseConfig validation
+    validation_config = {
         'api_type': config_data['api_type'],
-        'dataset_path': Path(config_data['dataset_path']),
-        'input_column_name': config_data.get('input_column_name', 'prompt'),  # Keep reasonable defaults for column names
+        'dataset_type': config_data['dataset_type'],
+        'dataset_path': config_data['dataset_path'],
+        'input_column_name': config_data.get('input_column_name', 'prompt'),
         'id_column_name': config_data.get('id_column_name', 'id'),
-        'use_load_from_disk': config_data['use_load_from_disk'],
-        'load_dataset_kwargs': config_data.get('load_dataset_kwargs') or {}
-    } 
+        'dataset_kwargs': config_data.get('dataset_kwargs'),
+        'apply_udf': config_data.get('apply_udf'),
+        'apply_udf_kwargs': config_data.get('apply_udf_kwargs'),
+        # Minimal required fields for BaseConfig - these won't be used for validation
+        'api_base_url': config_data.get('api_base_url', 'dummy'),
+        'model': config_data.get('model', 'dummy'),
+        'output_path': config_data.get('output_path', '/tmp/dummy'),
+        'max_connections': config_data.get('max_connections', 1),
+    }
+    
+    return BaseConfig(**validation_config) 
