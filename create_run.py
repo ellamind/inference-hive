@@ -37,7 +37,7 @@ echo "SLURM_JOB_ACCOUNT: ${{SLURM_JOB_ACCOUNT}}"
 echo "============================="
 
 # Check if this shard is already completed
-CURRENT_SHARD=${SLURM_ARRAY_TASK_ID}
+CURRENT_SHARD=${{SLURM_ARRAY_TASK_ID}}
 COMPLETED_SHARDS_FILE="{progress_dir}/shards_completed.log"
 FAILED_SHARDS_FILE="{progress_dir}/shards_failed.log"
 
@@ -290,7 +290,7 @@ INFERENCE_EXIT_CODE=$?
 
 if [ $INFERENCE_EXIT_CODE -eq 0 ]; then
     log "INFO" "Inference completed successfully, recording shard completion"
-    echo "${CURRENT_SHARD}" >> "$COMPLETED_SHARDS_FILE"
+    echo "${{CURRENT_SHARD}}" >> "$COMPLETED_SHARDS_FILE"
     log "INFO" "Done"
 else
     log "ERROR" "Inference failed with exit code $INFERENCE_EXIT_CODE"
