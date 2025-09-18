@@ -12,7 +12,7 @@ SBATCH_TEMPLATE = """#!/bin/bash
 #SBATCH --partition={partition}
 #SBATCH --account={account}
 #SBATCH --qos={qos}
-##SBATCH --array=1-{num_inference_servers}
+##SBATCH --array=0-{array_limit}
 #SBATCH --nodes={num_nodes_per_inference_server}
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task={cpus_per_node}
@@ -37,7 +37,7 @@ echo "SLURM_JOB_ACCOUNT: ${{SLURM_JOB_ACCOUNT}}"
 echo "============================="
 
 # Check if this shard is already completed
-CURRENT_SHARD=$((SLURM_ARRAY_TASK_ID - 1))
+CURRENT_SHARD=${SLURM_ARRAY_TASK_ID}
 COMPLETED_SHARDS_FILE="{progress_dir}/shards_completed.log"
 FAILED_SHARDS_FILE="{progress_dir}/shards_failed.log"
 
@@ -290,7 +290,7 @@ INFERENCE_EXIT_CODE=$?
 
 if [ $INFERENCE_EXIT_CODE -eq 0 ]; then
     log "INFO" "Inference completed successfully, recording shard completion"
-    echo "$((SLURM_ARRAY_TASK_ID - 1))" >> "$COMPLETED_SHARDS_FILE"
+    echo "${CURRENT_SHARD}" >> "$COMPLETED_SHARDS_FILE"
     log "INFO" "Done"
 else
     log "ERROR" "Inference failed with exit code $INFERENCE_EXIT_CODE"
@@ -366,6 +366,7 @@ def main():
 
     # num_inference_servers is the number of data shards
     config_dict["num_data_shards"] = config.num_inference_servers
+    config_dict["array_limit"] = config.num_inference_servers - 1
 
     # Generate additional SBATCH lines
     additional_sbatch_lines = ""

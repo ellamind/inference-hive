@@ -341,7 +341,7 @@ def main():
 
     if jobs:
         for job in jobs:
-            job['shard'] = int(job["name"].split("-")[-1]) -1
+            job['shard'] = int(job["name"].split("-")[-1])
         jobs.sort(key=lambda x: x["shard"])
 
         logger.info(f"Found {len(jobs)} existing jobs for {config.job_name}")
@@ -380,7 +380,7 @@ def main():
 
         progress_files = []
         for shard in shards:
-            progress_file = Path(args.run_dir / "progress" / f"{shard+1}-progress.jsonl")
+            progress_file = Path(args.run_dir / "progress" / f"{shard}-progress.jsonl")
             if progress_file.exists() and progress_file.stat().st_size > 0:
                 progress_files.append(progress_file)
 
