@@ -396,7 +396,7 @@ def main():
 
     # Copy udf.py file to output directory for reproducibility if apply_udf is used
     if config.apply_udf:
-        udf_path = Path(__file__).parent / "udf.py"
+        udf_path = Path(__file__).parent / "inference_hive" / "udf.py"
         udf_copy_path = output_dir / "udf.py"
         try:
             shutil.copy2(udf_path, udf_copy_path)
