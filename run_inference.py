@@ -335,6 +335,10 @@ async def run_inference_async(config, args: argparse.Namespace):
                         for keyword in [
                             "connection",
                             "timeout",
+                            "timed out",
+                            "request timed out",
+                            "read timed out",
+                            "gateway timeout",
                             "network",
                             "unreachable",
                             "refused",
@@ -352,8 +356,11 @@ async def run_inference_async(config, args: argparse.Namespace):
                             fatal_error_event.set()
                             logger.error(str(fatal))
                             raise
-                        logger.warning(f"API connection issue: {e}")
-                        raise
+                        # Treat non-fatal API errors as skipped rows to avoid dropping them silently
+                        logger.warning(f"API connection issue for row {row_id}, skipping: {e}")
+                        async with progress_lock:
+                            skipped_rows += 1
+                        return
                     else:
                         logger.error(f"API Error, skipping request: {e}")
                         async with progress_lock:
