@@ -5,7 +5,7 @@ partition: ""
 account: ""
 qos: ""
 cpus_per_node: 32 # cpu is not really needed for our workload.
-memory_per_node: "0" # "0" for all available memory per node
+memory_per_node: "0" # "0" for all available memory per node. leave empty if cluster auto-allocates memory per CPU.
 gres_per_node: "gpu:4" # Generic resources per node. Examples: "gpu:4", "a100:1", "gpu:h100:8"
 time_limit: "24:00:00" # Max walltime on cluster. Jobs are automatically resubmitted if they exceed time limit.
 # Additional SBATCH arguments (optional)
@@ -19,18 +19,23 @@ num_inference_servers: 1
 num_nodes_per_inference_server: 1 # Increase this only of your model requires more than 1 node per inference server.
 
 # === Environment Configuration ===
+# Option 1: Use pixi (set pixi_manifest and pixi_env)
 pixi_manifest: "pixi.toml"  # Path to the pixi manifest file. Edit only if you want to use one of the pre-installed environments (see README.md).
 pixi_env: "cuda-vllm"  # Name of the pixi environment to use (see README.md).
+# Option 2: Use a custom activation command (clear pixi_manifest and pixi_env above, set env_activation_command)
+env_activation_command:  # Custom command to activate the environment, e.g. "source ./activate.sh"
 env_vars:
   HF_HUB_OFFLINE: "1" # you should download data and model beforehand
   VLLM_DISABLE_COMPILE_CACHE: "1" # multiple vLLM instances on shared filesystem can cause problems
 
 
 # === Inference Server Configuration ===
+# Port is dynamically set by inference-hive using $IH_PORT (random port 30000-59999)
+# This avoids port collisions when multiple shards run on the same node.
 inference_server_command: > 
   python -m vllm.entrypoints.openai.api_server
   --host=localhost
-  --port=64776
+  --port=$IH_PORT
   --model="Qwen/Qwen3-4B"
   --tensor-parallel-size=1
   --data-parallel-size=4
@@ -48,8 +53,8 @@ health_check_interval_seconds: 20  # Interval between health check attempts
 
 
 # === API Configuration ===
-# make sure port is the same as in inference_server_command.
-api_base_url: "http://localhost:64776/v1"
+# Port uses ${IH_PORT} placeholder - inference-hive sets a random port (30000-59999) at runtime
+api_base_url: "http://localhost:${IH_PORT}/v1"
 api_type: "chat-completion"  # "chat-completion" or "completion"
 # make sure model is set to the exact same string as in inference_server_command. 
 model: "Qwen/Qwen3-4B"

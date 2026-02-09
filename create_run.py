@@ -1,4 +1,5 @@
 import argparse
+import re
 import shutil
 from pathlib import Path
 
@@ -7,7 +8,7 @@ from loguru import logger
 from inference_hive.config import load_job_config
 
 
-SBATCH_TEMPLATE = """#!/bin/bash
+SBATCH_TEMPLATE = r"""#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --partition={partition}
 #SBATCH --account={account}
@@ -16,8 +17,7 @@ SBATCH_TEMPLATE = """#!/bin/bash
 #SBATCH --nodes={num_nodes_per_inference_server}
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task={cpus_per_node}
-#SBATCH --mem={memory_per_node}
-#SBATCH --gres={gres_per_node}
+{memory_sbatch_line}#SBATCH --gres={gres_per_node}
 #SBATCH --time={time_limit}
 #SBATCH --signal=B:SIGUSR1@120
 #SBATCH --output={log_dir}/%a-%A-%N.log
@@ -185,14 +185,25 @@ trap 'cleanup SIGTERM' SIGTERM # send by scancel
 
 # Setup env
 
-# Activate pixi environment
-log "INFO" "Activating pixi environment: {pixi_env}"
-eval "$(pixi shell-hook --manifest-path {pixi_manifest} -e {pixi_env} --no-install)"
+# Activate environment
+{env_activation_block}
 log "INFO" "python path: $(which python)"
 
 # Add env exports
 {env_exports}
-export API_BASE_URL="{api_base_url}"
+
+# Pick a random port in valid range to avoid collisions when multiple shards run on same node
+# Range 30000-60000 avoids privileged ports and stays well under the 65535 limit
+IH_PORT=$((30000 + RANDOM % 30000))
+export IH_PORT
+log "INFO" "Dynamic port allocation: IH_PORT=$IH_PORT"
+
+# Set API_BASE_URL with dynamic port substitution
+# Replace ${{IH_PORT}} in the URL template with the actual port value
+_API_BASE_URL_TEMPLATE="{api_base_url}"
+export API_BASE_URL="${{_API_BASE_URL_TEMPLATE//\$\{{IH_PORT\}}/$IH_PORT}}"
+log "INFO" "API_BASE_URL=$API_BASE_URL"
+
 MASTER_NODE=$(scontrol show hostname ${{SLURM_JOB_NODELIST}} | head -n1)
 export MASTER_NODE
 
@@ -214,7 +225,7 @@ log "INFO" "Starting inference server on ${{SLURM_JOB_NUM_NODES}} nodes"
 INFERENCE_SERVER_LOG="{log_dir}/${{SLURM_ARRAY_TASK_ID}}-${{SLURM_JOB_ID}}-%N-inference-server.log"
 INFERENCE_SERVER_COMMAND="{inference_server_command}"
 log "INFO" "Inference server command: ${{INFERENCE_SERVER_COMMAND}}"
-setsid srun --output="$INFERENCE_SERVER_LOG" --error="$INFERENCE_SERVER_LOG" \\
+setsid srun --output="$INFERENCE_SERVER_LOG" --error="$INFERENCE_SERVER_LOG" \
     bash -c "${{INFERENCE_SERVER_COMMAND}}" &
 INFERENCE_SERVER_PID=$!
 
@@ -296,6 +307,35 @@ else
     log "ERROR" "Inference failed with exit code $INFERENCE_EXIT_CODE"
     log_failed_shard "inference_script_failed" "run_inference.py exited with code $INFERENCE_EXIT_CODE"
 fi
+
+# Cleanup: terminate the inference server regardless of how inference ended
+# This is critical to avoid wasting GPU hours when inference fails
+log "INFO" "Shutting down inference server..."
+if [ ! -z "$INFERENCE_SERVER_PID" ] && kill -0 $INFERENCE_SERVER_PID 2>/dev/null; then
+    log "INFO" "Sending SIGINT to inference server (PID: $INFERENCE_SERVER_PID)"
+    kill -INT -$INFERENCE_SERVER_PID 2>/dev/null || kill -INT $INFERENCE_SERVER_PID 2>/dev/null
+    sleep 0.1
+    if kill -0 $INFERENCE_SERVER_PID 2>/dev/null; then
+        kill -INT -$INFERENCE_SERVER_PID 2>/dev/null || kill -INT $INFERENCE_SERVER_PID 2>/dev/null
+    fi
+    
+    # Wait up to 30 seconds for graceful shutdown
+    wait_count=0
+    while [ $wait_count -lt 30 ] && kill -0 $INFERENCE_SERVER_PID 2>/dev/null; do
+        sleep 1
+        wait_count=$((wait_count + 1))
+    done
+    
+    # Force kill if still running
+    if kill -0 $INFERENCE_SERVER_PID 2>/dev/null; then
+        log "WARN" "Inference server did not terminate gracefully, force killing..."
+        kill -KILL -$INFERENCE_SERVER_PID 2>/dev/null || kill -KILL $INFERENCE_SERVER_PID 2>/dev/null
+    fi
+fi
+log "INFO" "Inference server shutdown complete"
+
+# Exit with the inference exit code to properly signal success/failure to Slurm
+exit $INFERENCE_EXIT_CODE
 """
 
 
@@ -331,6 +371,16 @@ def main():
         config = load_job_config(config_path)
         # Convert to dict for template formatting
         config_dict = config.model_dump()
+        
+        # Clean inference_server_command: YAML folded block scalar (>) replaces newlines
+        # with spaces but keeps backslashes from line continuation, resulting in "\ "
+        # sequences that cause shell parsing errors. Remove them.
+        if config_dict.get("inference_server_command"):
+            # Remove backslash followed by whitespace (line continuation artifacts)
+            cmd = config_dict["inference_server_command"]
+            cmd = re.sub(r'\\\s+', ' ', cmd)  # Replace \<whitespace> with single space
+            cmd = ' '.join(cmd.split())  # Normalize whitespace
+            config_dict["inference_server_command"] = cmd
     except Exception as e:
         logger.error(f"Configuration validation error: {e}")
         return 1
@@ -378,12 +428,25 @@ def main():
             additional_sbatch_lines += f"#SBATCH {key}={value}\n"
     config_dict["additional_sbatch_lines"] = additional_sbatch_lines
 
+    # Generate memory SBATCH line (optional - some clusters auto-allocate memory per CPU)
+    if config.memory_per_node:
+        config_dict["memory_sbatch_line"] = f"#SBATCH --mem={config.memory_per_node}\n"
+    else:
+        config_dict["memory_sbatch_line"] = ""
+
     # Generate environment variable exports
     env_exports = ""
     if config.env_vars:
         for key, value in config.env_vars.items():
             env_exports += f"export {key}=\"{value}\"\n"
     config_dict["env_exports"] = env_exports
+
+    # Generate environment activation block
+    if config.env_activation_command:
+        env_activation_block = f'log "INFO" "Activating environment with custom command"\n{config.env_activation_command}'
+    else:
+        env_activation_block = f'log "INFO" "Activating pixi environment: {config.pixi_env}"\neval "$(pixi shell-hook --manifest-path {config.pixi_manifest} -e {config.pixi_env} --no-install)"'
+    config_dict["env_activation_block"] = env_activation_block
 
     # Copy config file to output directory for reproducibility
     config_copy_path = output_dir / "ih_config.yaml"

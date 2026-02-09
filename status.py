@@ -21,14 +21,14 @@ def read_progress_file(file_path: str) -> pl.DataFrame:
         pl.col("progress").struct.field("total").alias("total"),
         pl.col("progress").struct.field("new").alias("new"),
         pl.col("progress").struct.field("existing").alias("existing"),
-        pl.col("progress").struct.field("eta_seconds").alias("eta_seconds"),
+        pl.col("progress").struct.field("eta_seconds").cast(pl.Float64).alias("eta_seconds"),
         pl.col("progress").struct.field("eta_formatted").alias("eta_formatted"),
         
-        # Extract overall throughput fields (per second)
-        pl.col("throughput").struct.field("overall").struct.field("requests_per_second").alias("overall_requests_ps"),
-        pl.col("throughput").struct.field("overall").struct.field("total_tokens_per_second").alias("overall_total_tps"),
-        pl.col("throughput").struct.field("overall").struct.field("prompt_tokens_per_second").alias("overall_prompt_tps"),
-        pl.col("throughput").struct.field("overall").struct.field("completion_tokens_per_second").alias("overall_completion_tps"),
+        # Extract overall throughput fields (per second) - cast to Float64 for consistent schema
+        pl.col("throughput").struct.field("overall").struct.field("requests_per_second").cast(pl.Float64).alias("overall_requests_ps"),
+        pl.col("throughput").struct.field("overall").struct.field("total_tokens_per_second").cast(pl.Float64).alias("overall_total_tps"),
+        pl.col("throughput").struct.field("overall").struct.field("prompt_tokens_per_second").cast(pl.Float64).alias("overall_prompt_tps"),
+        pl.col("throughput").struct.field("overall").struct.field("completion_tokens_per_second").cast(pl.Float64).alias("overall_completion_tps"),
         
         # Convert timestamp to datetime for display
         pl.from_epoch(pl.col("timestamp")).alias("datetime")

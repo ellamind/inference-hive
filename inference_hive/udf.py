@@ -4,12 +4,8 @@ A UDF function must take a row of the dataset as its first positional argument, 
 This can be used for lightweight dataset transformations. A common use case is if your dataset contains documents and you want to format them into a prompt template.
 """
 from typing import Dict, Any
+from .propella import create_messages
 
-def do_nothing(row: Dict[str, Any]) -> Dict[str, Any]:
-    return row
-
-# Example UDF for formatting a prompt using the 'text' column of the dataset.
-def format_prompt(row: Dict[str, Any]) -> Dict[str, Any]:
-    user_prompt = f"Summarize the following document:\n{row['text']}"
-    row['messages'] = [{"role": "user", "content": user_prompt.format(text=row["text"])}]
+def format_propella_prompt(row: Dict[str, Any]) -> Dict[str, Any]:
+    row['messages'] = create_messages(row['text'])
     return row

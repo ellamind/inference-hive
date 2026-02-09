@@ -1,6 +1,6 @@
 import yaml
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, Dict, Any, Literal
 
 
@@ -84,7 +84,7 @@ class JobConfig(BaseConfig):
         ..., gt=0, description="Number of nodes per inference server"
     )
     cpus_per_node: int = Field(..., gt=0, description="Number of CPUs per node")
-    memory_per_node: str = Field(..., description="Memory per node in GB")
+    memory_per_node: Optional[str] = Field(default=None, description="Memory per node (e.g., '64G'). Leave empty if cluster auto-allocates memory per CPU.")
     gres_per_node: str = Field(..., description="Generic resources per node (e.g., 'gpu:4', 'nvgpu:2', 'a100:1')")
     time_limit: str = Field(..., description="Time limit for the job (HH:MM format)")
     additional_sbatch_args: Optional[Dict[str, str]] = Field(
@@ -95,16 +95,25 @@ class JobConfig(BaseConfig):
     env_vars: Optional[Dict[str, str]] = Field(
         default=None, description="Environment variables as key-value pairs"
     )
-    pixi_manifest: str = Field(
-        ..., description="Path to the pixi manifest file"
+    pixi_manifest: Optional[str] = Field(
+        default=None, description="Path to the pixi manifest file (required if env_activation_command is not set)"
     )
-    pixi_env: str = Field(
-        ..., description="Pixi environment to use"
+    pixi_env: Optional[str] = Field(
+        default=None, description="Pixi environment to use (required if env_activation_command is not set)"
+    )
+    env_activation_command: Optional[str] = Field(
+        default=None, description="Custom command to activate the environment (e.g., 'source ./activate.sh'). If set, pixi_manifest and pixi_env are ignored."
     )
 
     # Inference Server Configuration
     inference_server_command: str = Field(
-        ..., description="Command to start the inference server"
+        ..., description="Command to start the inference server. Use ${IH_PORT} for dynamic port allocation."
+    )
+    
+    # Port Configuration (deprecated - random port is now used)
+    base_port: int = Field(
+        default=64000, ge=1024, le=65000, 
+        description="Deprecated: This field is ignored. Port is now randomly assigned (30000-59999) to avoid collisions."
     )
 
     # Health Check Configuration
@@ -212,6 +221,20 @@ class JobConfig(BaseConfig):
                 raise ValueError(f"SBATCH argument '{key}' is reserved and cannot be overridden. Reserved args: {sorted(reserved_args)}")
         
         return v
+
+    @model_validator(mode="after")
+    def validate_env_activation(self):
+        """Validate that either pixi fields or env_activation_command is provided."""
+        has_pixi = self.pixi_manifest is not None and self.pixi_env is not None
+        has_custom = self.env_activation_command is not None
+        
+        if not has_pixi and not has_custom:
+            raise ValueError(
+                "Either 'pixi_manifest' and 'pixi_env' must both be set, "
+                "or 'env_activation_command' must be set"
+            )
+        
+        return self
 
 
 class InferenceConfig(BaseConfig):

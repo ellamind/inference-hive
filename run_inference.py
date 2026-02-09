@@ -5,6 +5,7 @@ import os
 import signal
 import time
 
+import httpx
 from loguru import logger
 from openai import AsyncOpenAI
 from inference_hive import udf
@@ -238,8 +239,25 @@ async def run_inference_async(config, args: argparse.Namespace):
     existing_ids = _read_existing_ids(config.output_path, args.shard)
 
     api_key = os.environ.get("API_KEY", "EMPTY")
+    
+    # Configure httpx limits to match max_connections (default httpx limit is 1000)
+    HEADROOM = 256  # avoids edge queuing
+    limits = httpx.Limits(
+        max_connections=config.max_connections + HEADROOM,
+        max_keepalive_connections=config.max_connections + HEADROOM,
+        keepalive_expiry=60.0,
+    )
+    # Connect timeout increased from 2.0 to 60.0 to handle server under load
+    timeout = httpx.Timeout(connect=60.0, read=300.0, write=300.0, pool=300.0)
+    http_client = httpx.AsyncClient(limits=limits, timeout=timeout)
+    
+    # Use API_BASE_URL env var if set (for dynamic port substitution), otherwise use config
+    api_base_url = os.environ.get('API_BASE_URL', config.api_base_url)
     client = AsyncOpenAI(
-        base_url=config.api_base_url, api_key=api_key, max_retries=config.max_retries
+        base_url=api_base_url, 
+        api_key=api_key, 
+        max_retries=config.max_retries,
+        http_client=http_client
     )
 
     schema = (
@@ -516,13 +534,25 @@ async def run_inference_async(config, args: argparse.Namespace):
 
             # Handle fatal outage: cancel remaining tasks
             if fatal_error_event.is_set():
+                logger.error("Fatal error detected, cancelling remaining tasks and shutting down...")
                 for t in list(inflight):
                     if not t.done():
                         t.cancel()
                 if inflight:
-                    await asyncio.gather(*inflight, return_exceptions=True)
+                    # Use wait_for with timeout to avoid hanging forever on stubborn tasks
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*inflight, return_exceptions=True),
+                            timeout=10.0
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning("Timeout waiting for tasks to cancel, proceeding with shutdown")
                 if not reporter_task.done():
                     reporter_task.cancel()
+                    try:
+                        await asyncio.wait_for(asyncio.shield(reporter_task), timeout=2.0)
+                    except (asyncio.TimeoutError, asyncio.CancelledError):
+                        pass
                 raise RuntimeError("API appears to be down: aborting shard to preserve data")
 
             # Await remaining tasks
@@ -576,11 +606,26 @@ async def run_inference_async(config, args: argparse.Namespace):
             logger.info("Writer emergency close completed successfully.")
         raise
     finally:
+        # Close httpx client if it was created
+        if http_client is not None:
+            await http_client.aclose()
+            logger.info("httpx client closed")
         logger.info("Shutdown completed")
 
 
 def main(config, args: argparse.Namespace):
-    asyncio.run(run_inference_async(config, args))
+    try:
+        asyncio.run(run_inference_async(config, args))
+    except RuntimeError as e:
+        if "API appears to be down" in str(e):
+            logger.error(f"Exiting due to API failure: {e}")
+            import sys
+            sys.exit(1)
+        raise
+    except Exception as e:
+        logger.error(f"Unhandled exception in main: {e}")
+        import sys
+        sys.exit(1)
 
 
 if __name__ == "__main__":
