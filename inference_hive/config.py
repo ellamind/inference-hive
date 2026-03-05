@@ -52,6 +52,11 @@ class BaseConfig(BaseModel):
         ..., gt=0, description="Maximum number of connections"
     )
     max_retries: int = Field(default=3, ge=0, description="Maximum number of retries")
+    num_workers: int = Field(
+        default=4, ge=1,
+        description="Number of parallel worker processes for API calls. "
+                    "Uses a queue-based reader/worker/writer pipeline when > 1.",
+    )
 
     @field_validator("dataset_path", mode="before")
     @classmethod

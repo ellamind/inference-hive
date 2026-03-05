@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
+import gc
 import time
 
 import datasets as hfds
@@ -29,6 +30,7 @@ class DatasetWriter:
         checkpoint_interval_seconds: int = 1800,
         check_time_every_n_rows: int = 100,
         max_num_checkpoints: int = 5,
+        shard_suffix: str = "",
     ) -> None:
         self.schema = schema
         self.max_file_size_bytes = max_file_size_mb * 1024 * 1024  # Convert MB to bytes
@@ -37,7 +39,7 @@ class DatasetWriter:
         self.checkpoint_interval_seconds = checkpoint_interval_seconds
         self.check_time_every_n_rows = check_time_every_n_rows
         self.max_num_checkpoints = max_num_checkpoints
-        self.shard_name = str(f"shard{shard:06d}")
+        self.shard_name = f"shard{shard:06d}{shard_suffix}"
         self.dataset_dir = dataset_dir.absolute()
         self.dataset_dir.mkdir(exist_ok=True)
 
@@ -98,7 +100,8 @@ class DatasetWriter:
         self.pq_writer.write_batch(batch=pa.RecordBatch.from_pydict(self.batch, schema=self.schema))
         self.rows_added_to_tempfile += self.rows_in_batch
         self.__init_batch()
-        
+        gc.collect()
+
         if emergency:
             logger.info("Creating checkpoint because of emergency.")
             self.create_checkpoint(emergency=True)

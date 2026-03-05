@@ -296,8 +296,45 @@ INFERENCE_PROGRESS_LOG="{progress_dir}/${{SLURM_ARRAY_TASK_ID}}-progress.jsonl"
 # Start inference in a new process group so we can kill the entire group
 setsid python run_inference.py --config {config_path} --num-shards {num_data_shards} --shard ${{CURRENT_SHARD}} --log-file $INFERENCE_PROGRESS_LOG &
 INFERENCE_PID=$!
+
+# GPU idle monitor - background watchdog that terminates the job if the GPU
+# idles for too long (e.g. inference server crashed but client keeps retrying).
+# Waits for a warm-up period, then polls nvidia-smi every 60s.
+(
+    GPU_IDLE_WARMUP=300
+    GPU_IDLE_THRESHOLD=5
+    GPU_IDLE_MAX_CHECKS=5
+    GPU_IDLE_INTERVAL=60
+
+    sleep $GPU_IDLE_WARMUP
+    consecutive_idle=0
+    while kill -0 $INFERENCE_PID 2>/dev/null; do
+        gpu_util=$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+        if [ -n "$gpu_util" ] && [ "$gpu_util" -lt $GPU_IDLE_THRESHOLD ] 2>/dev/null; then
+            consecutive_idle=$((consecutive_idle + 1))
+            log "WARN" "GPU utilization low (${{gpu_util}}%), idle check ${{consecutive_idle}}/${{GPU_IDLE_MAX_CHECKS}}"
+            if [ $consecutive_idle -ge $GPU_IDLE_MAX_CHECKS ]; then
+                log "ERROR" "GPU idle for $((GPU_IDLE_MAX_CHECKS * GPU_IDLE_INTERVAL))s+ — inference server likely dead. Terminating to save resources."
+                log_failed_shard "gpu_idle_timeout" "GPU utilization below ${{GPU_IDLE_THRESHOLD}}% for $((GPU_IDLE_MAX_CHECKS * GPU_IDLE_INTERVAL))s"
+                kill -TERM -$INFERENCE_PID 2>/dev/null || kill -TERM $INFERENCE_PID 2>/dev/null
+                exit 0
+            fi
+        else
+            consecutive_idle=0
+        fi
+        sleep $GPU_IDLE_INTERVAL
+    done
+) &
+HEALTHCHECK_PID=$!
+
 wait $INFERENCE_PID
 INFERENCE_EXIT_CODE=$?
+
+# Stop the GPU idle monitor (use || true to avoid set -e exit when process already gone)
+if [ -n "$HEALTHCHECK_PID" ]; then
+    kill $HEALTHCHECK_PID 2>/dev/null || true
+    wait $HEALTHCHECK_PID 2>/dev/null || true
+fi
 
 if [ $INFERENCE_EXIT_CODE -eq 0 ]; then
     log "INFO" "Inference completed successfully, recording shard completion"

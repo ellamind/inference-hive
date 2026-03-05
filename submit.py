@@ -66,7 +66,7 @@ def submit_shards(shards_to_submit, config, job_script):
         except subprocess.CalledProcessError as e:
             error_msg = e.stderr or e.stdout or ""
             if "QOSMaxSubmitJobPerUserLimit" in error_msg or "Job violates accounting/QOS policy" in error_msg:
-                logger.warning(f"QOS limit reached after submitting {submitted} jobs. Remaining: {len(shards_to_submit) - i}")
+                logger.warning(f"QOS limit reached after submitting {submitted} jobs. Remaining: {len(shards_to_submit) - i}\n{error_msg.strip()}")
                 return submitted, shards_to_submit[i:]
             else:
                 logger.error(f"sbatch failed for shard {shard}: {e}")
